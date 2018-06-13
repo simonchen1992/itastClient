@@ -1,0 +1,232 @@
+#StartConfiguration
+
+  system.requestNumberOfDUTtoTest
+
+  system.requestEngineerEnterDefaultParameters
+
+  robot.setPositionC0
+
+  db.writeDefaultParameterList
+
+#EndConfiguration
+
+
+#StartPreChecks
+
+  *it is important to check that the device has the proper configuration
+
+  sdk.dut1.setConfigToDefault
+
+  if sdk.dut1.setConfigToDefault.ReturnCode==error
+
+    sdk.dut1.GetDeviceState
+
+    if sdk.dut1.GetDeviceState.ReturnCode==(error or NotResponseTimeOut)
+      sdk.dut1.ResetDevice
+
+        if sdk.dut1.ResetDevice==0x01
+
+          system.requestManualDeviceReset
+
+        endif
+
+    endif
+
+  endif
+
+  sdk.dut1.getConfig
+
+  system.checkConfig
+    *on that check I would exclude Transaction Time (HHMMSS) or at least (MMSS) because it will change as soon as the configuration is set in the device
+      if system.checkConfig issue
+        sdk.dut1.SetConfig(setCorrectValueInParametersWithIssues)
+
+      endif
+
+    #startLoopOfTestingAreaCheckZn
+      *in that process is important to check all positions in low speed and note if position was not reachable
+
+      *as all positions are tested from top to bottom, if Zn@coordinate is free of obstacle, 'n' dont need be increased, otherwise 'n+1'
+
+      db.getPositiontoCheck
+      robot.goHome
+      robot.dut1.goToPositionToTestXYZ
+      db.dut1.noteResultOfCheck
+        *if can not be tested, NT will be used as verdict in the report when position is required)
+
+
+    #endLoopOfTestingAreaCheckZn
+
+
+#EndPreChecks
+
+
+
+#startCardTestSequence
+
+  robot.goHome
+
+  system.getQRCode
+
+  db.getVTF
+
+  db.getPositionsToTest
+
+  robot.goRackIn
+
+  robot.suckCard
+
+  robot.goHome
+
+    #StartLoopCardDUT1
+      #This loop is to be done maximum 7 times/position
+      #If FAIL=3 the position is FAIL and can skip the remain transactions in that position
+
+      sdk.dut1.prepareTransaction
+
+      sdk.dut1.startTransaction
+
+      robot.dut1.goToPositionToTestXYZ
+
+      sdk.dut1.startTransaction.ReturnValue
+
+      db.dut1.writePositionResult
+
+      sdk.dut1.GetDebugLog
+
+      db.dut1.saveDebugLog
+
+        if sdk.dut1.startTransaction.ReturnValue== (C1 01 EF 06 or C1 01 EF 07)
+          sdk.dut1.StopCurrentTransaction
+
+        endif
+
+        if sdk.dut1.startTransaction.ReturnValue== C1 01 EF 05
+
+          sdk.dut1.ResetDevice
+
+          if sdk.dut1.ResetDevice==0x01
+
+            system.requestManualDeviceReset
+
+          endif
+
+        endif
+
+      sdk.dut1.ClearLogs
+
+      db.getNextPositionToTest
+
+      robot.goHome
+
+    #EndLoopCardDUT1
+
+
+  system.db.dut1.decideCardResult
+
+  system.db.dut1.checkIfZ3Fail
+
+
+    #LoopTestRemainZ2 (if final result is DF and Z3 has some position with FAIL verdict)
+
+      robot.goHome
+
+      sdk.dut1.startTransaction
+
+      robot.dut1.goToPositionToTestXYZ
+
+      sdk.dut1.startTransaction.ReturnValue
+
+      db.dut1.writePositionResult
+
+      sdk.dut1.GetDebugLog
+
+      db.dut1.saveDebugLog
+
+        if sdk.dut1.startTransaction.ReturnValue== (C1 01 EF 06 or C1 01 EF 07)
+          sdk.dut1.StopCurrentTransaction
+
+        endif
+
+      sdk.dut1.ClearLogs
+
+      db.getNextPositionToTest
+
+    #EndLoopTestRemainZ2
+
+  robot.goRackOut
+
+  robot.stopSuckCard
+
+  system.db.dut1.checkCardResult
+
+  db.dut1.writeFinalCardResult
+
+  goTo #startCardTestSequence
+
+#EndCardTestSequence
+
+
+
+#start.ToPerformAfterEachSDKcommandSentIfNoAnswerReceived
+
+  if sdk.dut1.GetDeviceState.ReturnCode==(error or NotResponseTimeOut)
+    sdk.dut1.ResetDevice
+
+      if sdk.dut1.ResetDevice==0x01
+
+        system.requestManualDeviceReset
+
+      endif
+
+  endif
+
+#end.ToPerformAfterEachSDKcommandSentIfNoAnswerReceived
+
+
+TOPICS TO HAVE IN CONSIDERATION
+
+  Veredict decision in Real Time by Position
+
+    PASS veredict if:
+      C1 01 59 31
+      C1 01 5A 31
+      C1 01 30 30
+
+    DF veredict if:
+      C1 01 EF 04
+      C1 01 EF 05
+
+    CF veredict if:
+      C1 01 EF 03
+
+    TF veredict if:
+      C1 01 EF 01
+      C1 01 EF 02
+      C1 01 EF 06
+      C1 01 EF 07 (it may need be asked to VISA but Carlos assume that for the development)
+
+  Veredict position decision once one round of Card is completed
+
+    Follow standard process
+      CF only if everything is FAIL and not TF
+      TF only if everything is TF
+      DF only if some position is PASS
+
+  Card Verdict
+
+    NT only if all positions NT
+    Pass if all positions are Pass
+    Fail if there is any DF, CF or TF
+
+  Evidences
+    For all transaction the log of the result must be saved
+
+
+  Tested Positions
+    Must be noted if real Z0 is not possible to be tested
+
+    Visa must clarify how to proceed with Z1,Z2,Z3,Z4 when automatic system can not reach Z0 perfectly (1,2,3,4 adding negative offset or test 1.2,2.2,3.2,4.2)
+
+
+Note: Visa does not say to "StopCurrentTransaction" when result is EF07 but is the most logic, must be asked to VISA anyway
