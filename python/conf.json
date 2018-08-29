@@ -1,22 +1,29 @@
 {
-    "start": "C:\\Users\\user\\Desktop\\tools_Auth\\startservice.exe",
-    "stop": "C:\\Users\\user\\Desktop\\tools_Auth\\stopservice.exe",
-    "resetsupport": 1, 
+    "start": "C:\\Users\\user\\Desktop\\tools_Auth_20180705\\tools_Auth\\startservice.exe",
+    "stop": "C:\\Users\\user\\Desktop\\tools_Auth_20180705\\tools_Auth\\stopservice.exe",
+    "resetsupport": "00",
+    "deviceID": ["1"] 
 
-    "fontSize": 12,
     "BaseSettings":{
         "font":1,
         "size":2
                    },
 
-"positions": [
-{ "dut1": [4.84, 348.87, 109, -179.66, -0.4, 0 ] },
-{ "ref": [4.84, 348.87, 109, -179.66, -0.4, 0 ] },
-{ "c1": [4.84, 348.87, 109, -179.66, -0.4, 0 ] },
-{ "c2": [4.84, 348.87, 109, -179.66, -0.4, 0 ] },
-{ "c3": [4.84, 348.87, 109, -179.66, -0.4, 0 ] },
-{ "c4": [4.84, 348.87, 109, -179.66, -0.4, 0 ] }
-]
+"positions": 
+{ "dut1": [4.84, 348.87, 109, -179.66, -0.4, 0 ] ,
+ "dut2": [4.84, 348.87, 109, -179.66, -0.4, 0 ] ,
+ "ref": [4.84, 348.87, 109, -179.66, -0.4, 0 ] ,
+ "c1": [4.84, 348.87, 109, -179.66, -0.4, 0 ] ,
+ "c2": [4.84, 348.87, 109, -179.66, -0.4, 0 ] ,
+ "c3": [4.84, 348.87, 109, -179.66, -0.4, 0 ] ,
+ "c4": [4.84, 348.87, 109, -179.66, -0.4, 0 ] 
+},
+
+"portnumber":
+{ "qrscan1": 8,
+ "qrscan2": 3,
+ "dispensercontroller": 2
+}
 
 }
 

@@ -5,6 +5,7 @@ import itast.settings
 import itast.utils
 import time
 import win32api
+import os
 
 def requestJson(query):
   res = requests.get(itast.settings.ITAST_HOST + query)
@@ -115,24 +116,24 @@ def sdkGetConfig(d):
 def sdkSetConfigToDefault(d):
   return requestJson('/sdk/setconfigtodefault' + d)
 
-def sdkSetConfig(tags, tx, d):
+def sdkSetConfig(tag, value, d):
   # TODO: this method is not implemented in the the server side
   print "SetConfig not implemented"
-  return requestJson('/sdk/setconfig' + d + '?' + 'tags=' + str(tags) + '&' + urlencode(tx))
+  return requestJson('/sdk/setconfig' + d + '?' + 'tag=' + str(tag) + '&' + 'value=' + str(value))
 
 def sdkPrepareTransaction(tx,d):
   return requestJson('/sdk/preparetransaction' + d + '?' + urlencode(tx))
 
-def sdkStartTransaction(amount, tx, d, config):  # changed for asyn way
+def sdkStartTransaction(amount, tx, d):  # changed for asyn way
   foretime = time.time()
   result = requestJson('/sdk/starttransaction' + d + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
-  while result is None:
-    if time.time() - foretime <= int(config[1].split('\n')[35][5:], 16)-5:
-      print time.time() - foretime
-      pass
-    else:
-      #sdkStopCurrentTransaction(tx, d)
-      print time.time() - foretime
+  # while result is None:
+  #   if time.time() - foretime <= int(config[1].split('\n')[35][5:], 16)-5:
+  #     print time.time() - foretime
+  #     pass
+  #   else:
+  #     #sdkStopCurrentTransaction(tx, d)
+  #     print time.time() - foretime
   return result
 
 def sdkStopCurrentTransaction(tx, d):
@@ -180,11 +181,12 @@ def TxVerdict(amount, result, txverdict, changeamount, config):  # TODO: EF00
   elif (result == 'EF01') or (result == 'EF02') or (result == 'EF06'):
     txverdict.append('TF')
   elif result == '5A31':
-    if devicetype == '28004000':
-      txverdict.append('PASS')
-    if devicetype == '20804000':
-      txverdict.append('NT')
-    if devicetype == '20004000':
+    # check if the device is online-capable device
+    bstr = bin(int(devicetype[1], 16))[2:]
+    l = len(bstr) % 4
+    if l > 0:
+      bstr = ('0' * (4 - l)) + bstr
+    if bstr[0] == '0':
         Amountzerocheck = config[1].split('\n')[9][5:]
         Statuscheck = config[1].split('\n')[2][5:]
         Floorlimit = config[1].split('\n')[6][5:]
@@ -208,8 +210,11 @@ def TxVerdict(amount, result, txverdict, changeamount, config):  # TODO: EF00
 
 
 def reset(d, stop, start, resetsupport):  # Input data: device number, startservice and stopservice address, reset support or not
-  if resetsupport == 0:
+  t = 0
+  if resetsupport == 1:
     if sdkResetDevice(d)[0] != '00':
+      os.system('taskkill /IM AuthTest_tool.exe /F')
+      time.sleep(3)
       win32api.ShellExecute(0, 'open', stop, '', '', 1)  # shall be run stop and start executable and then getdevicestate
       time.sleep(4)
       win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
@@ -220,17 +225,26 @@ def reset(d, stop, start, resetsupport):  # Input data: device number, startserv
         return True
     else:
       time.sleep(22)
-  if sdkGetDeviceState(d)[0] != '00':
-    win32api.ShellExecute(0, 'open', stop, '', '', 1)  # shall be run stop and start executable and then getdevicestate
-    time.sleep(4)
-    win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
-    time.sleep(4)
+  while t <= 3:
     if sdkGetDeviceState(d)[0] != '00':
-      return False
+      win32api.ShellExecute(0, 'open', stop, '', '', 1)  # shall be run stop and start executable and then getdevicestate
+      time.sleep(4)
+      if os.system('tasklist|find /i "AuthTest_tool.exe"') == 0:
+        os.system('taskkill /IM AuthTest_tool.exe /F')
+      time.sleep(4)
+      win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
+      time.sleep(40)
+      if sdkGetDeviceState(d)[0] != '00':
+        if t == 3:
+          return False
+        else:
+          t += 1
+          continue
+      else:
+        return True
     else:
       return True
-  else:
-    return True
+
 
 
 
