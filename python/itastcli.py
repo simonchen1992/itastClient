@@ -113,7 +113,7 @@ def dispenser_initiate():
 #   itast.client.getNewLog(sessionID,caseID,'Addressing of all positions', '', '', '')
 #   session = itast.client.getSession(sessionID)
 NRposA = testposition(session['dut1_nrpos'])
-print "Not reachable positions are:\n"
+print "Not reachable positions are:"
 print NRposA
 
 # Initialize device configuration
@@ -157,7 +157,7 @@ def main_loop():
             itast.client.getNewLog(sessionID, '', 'Successful pickup of the card', '', '', '')  # record log in database
             itast.client.dispenserMov(rackIn, '2.8', 'up')
             #  get the card information from database
-            card = itast.client.getCard('175')
+            card = itast.client.getCard(qr1)
             cardID = card['id']
             NTpos = testposition(card['positions'])
             NTpos.extend(NRposA)  # the return value of "expend" is None, can only be used in this way
@@ -191,6 +191,8 @@ def main_loop():
                 for pos in robot.points(1, 40, device_orientation):
                     if breakflag:
                         break
+                    # Flag: Reset not-tested-position flag
+                    NTflag = False
                     #  Parameter: Reset transaction result, shall be reset after move positions
                     txverdict = []
                     attempt = 0
@@ -198,7 +200,9 @@ def main_loop():
                     posID = str(pos[3]) + pos[0]
                     for string in NTpos:
                         if string == posID:
-                            continue
+                            NTflag = True
+                    if NTflag and dutID != 'ref':
+                        continue
                     #  Create test case: specified for one test height-position
                     case = itast.client.getNewCase(sessionID, cardID, dutID, posID)
                     caseID = case['id']
