@@ -124,7 +124,7 @@ def sdkSetConfig(tag, value, d):
 def sdkPrepareTransaction(tx,d):
   return requestJson('/sdk/preparetransaction' + d + '?' + urlencode(tx))
 
-def sdkStartTransaction(amount, tx, d):  # changed for asyn way
+def sdkStartTransaction(amount, tx, d, config):  # changed for asyn way
   foretime = time.time()
   result = requestJson('/sdk/starttransaction' + d + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
   # while result is None:
@@ -205,13 +205,12 @@ def TxVerdict(amount, result, txverdict, changeamount, config):  # TODO: EF00
           txverdict.append('NT')
   else:
     txverdict.append('improper result: ' + result)
-  output = [changeamount, amount, txverdict]
-  return output
+  return [changeamount, amount, txverdict]
 
 
 def reset(d, stop, start, resetsupport):  # Input data: device number, startservice and stopservice address, reset support or not
   t = 0
-  if resetsupport == 1:
+  if resetsupport == '00':
     if sdkResetDevice(d)[0] != '00':
       os.system('taskkill /IM AuthTest_tool.exe /F')
       time.sleep(3)
@@ -233,7 +232,7 @@ def reset(d, stop, start, resetsupport):  # Input data: device number, startserv
         os.system('taskkill /IM AuthTest_tool.exe /F')
       time.sleep(4)
       win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
-      time.sleep(40)
+      time.sleep(15)
       if sdkGetDeviceState(d)[0] != '00':
         if t == 3:
           return False

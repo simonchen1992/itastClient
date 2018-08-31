@@ -1,7 +1,7 @@
 {
     "start": "C:\\Users\\user\\Desktop\\tools_Auth_20180705\\tools_Auth\\startservice.exe",
     "stop": "C:\\Users\\user\\Desktop\\tools_Auth_20180705\\tools_Auth\\stopservice.exe",
-    "resetsupport": "00",
+    "resetsupport": "01",
     "deviceID": ["1"], 
 
     "BaseSettings":{

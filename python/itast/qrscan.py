@@ -18,3 +18,14 @@ def startscan(port):
         output = que.Value
     ctrl.Execute("RAW", "READOFF")
     return output
+
+def multiscan(port, times):
+    i = 0
+    qr = startscan(port)
+    while qr == 'QR code not found!' and i <= times:
+        qr = startscan(port)
+        i += 1
+    if qr == 'QR code not found!':
+        raise Exception('Scan failure')
+    else:
+        return qr

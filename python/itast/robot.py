@@ -68,7 +68,7 @@ def init(sessionID, deviceID):
             client.getNewLog(sessionID, '', 'reference device Position 0C calibration', '', '', '')
             return device_orientation
         else:
-            setting = input()
+            setting = raw_input()
             continue
 
 #  setting - calibrate device 0C position
