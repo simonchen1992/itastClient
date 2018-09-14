@@ -5,6 +5,7 @@ import itast.settings
 import itast.utils
 import time
 import win32api
+import threading
 import os
 
 def requestJson(query):
@@ -124,17 +125,49 @@ def sdkSetConfig(tag, value, d):
 def sdkPrepareTransaction(tx,d):
   return requestJson('/sdk/preparetransaction' + d + '?' + urlencode(tx))
 
-def sdkStartTransaction(amount, tx, d, config):  # changed for asyn way
-  foretime = time.time()
-  result = requestJson('/sdk/starttransaction' + d + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
-  # while result is None:
-  #   if time.time() - foretime <= int(config[1].split('\n')[35][5:], 16)-5:
-  #     print time.time() - foretime
-  #     pass
-  #   else:
-  #     #sdkStopCurrentTransaction(tx, d)
-  #     print time.time() - foretime
-  return result
+def sdkStartTransaction(amount, tx, dutID, config, pos, sessionID,caseID, data):  # changed for asyn way
+  max_waiting_rffield = 1.5
+  from itast.robot import goto_DUT_tx, goto_DUT, leave
+  class MyThread(threading.Thread):
+    def __init__(self, func, args=()):
+      threading.Thread.__init__(self)
+      self.func = func
+      self.args = args
+
+    def run(self):
+      self.result = self.func(*self.args)
+
+    def get_result(self):
+      try:
+        return self.result
+      except Exception as e:
+        print e
+  def start_tx():
+    results = requestJson('/sdk/starttransaction' + dutID + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
+    return results
+  def robot_leave():
+    leave()
+  def stop_tx():
+    exec_vcasCommand("itast.client.sdkStopCurrentTransaction(tx, dutID)", tx, dutID, sessionID,caseID, data)
+
+  goto_DUT(pos, dutID)  # Goto test positions
+  exec_vcasCommand("itast.client.sdkPrepareTransaction(tx, dutID)", tx, dutID, sessionID,caseID, data)  # Prepare transaction
+  t1 = MyThread(start_tx, args='')
+  t3 = threading.Thread(target=stop_tx, args='')
+  t1.start()
+  t1.join(max_waiting_rffield)
+  goto_DUT_tx(pos[3], dutID)  # Card falls down
+  print "start test:", time.ctime()
+  t1.join(1)
+  if t1.isAlive():
+    print "moveup:", time.ctime()
+    robot_leave()
+    t1.join(8)
+    if t1.isAlive():
+      print "stop test:", time.ctime()
+      t3.start()
+      t1.join()
+  return t1.get_result()
 
 def sdkStopCurrentTransaction(tx, d):
   return requestJson('/sdk/stopcurrenttransaction' + d + '?' + urlencode(tx))
@@ -150,6 +183,24 @@ def sdkGetDeviceState(d):
 
 def sdkResetDevice(d):
   return requestJson('/sdk/resetdevice' + d)
+
+
+# VCAS command watchdog method
+def exec_vcasCommand(cmd, tx, dutID, sessionID, caseID, data):
+    start = data["start"]  # start service address
+    stop = data["stop"]  # stop service address
+    resetsupport = data["resetsupport"]  # Device support reset function or not: 0 supported, 1 not supported
+    response = []
+    exec 'response = %s' % cmd
+    while response[0] != '00':  # prepare transaction procedure
+        itast.client.getNewLog(sessionID, caseID, 'Execute refresh procedure', '', '', '')
+        if itast.client.reset('1', stop, start, resetsupport):
+            pass
+        else:
+            exit('reset failure')
+        exec 'response = %s' % cmd
+    return response
+
 
 # robot
 def robotDuttx(dutID, Z, offset):
@@ -211,25 +262,23 @@ def TxVerdict(amount, result, txverdict, changeamount, config):  # TODO: EF00
 def reset(d, stop, start, resetsupport):  # Input data: device number, startservice and stopservice address, reset support or not
   t = 0
   if resetsupport == '00':
-    if sdkResetDevice(d)[0] != '00':
-      os.system('taskkill /IM AuthTest_tool.exe /F')
-      time.sleep(3)
-      win32api.ShellExecute(0, 'open', stop, '', '', 1)  # shall be run stop and start executable and then getdevicestate
-      time.sleep(4)
-      win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
-      time.sleep(4)
-      if sdkGetDeviceState(d)[0] != '00':
-        return False
-      else:
-        return True
+    resetRes = sdkResetDevice(d)[0]
+    time.sleep(22)
+    if resetRes != '00':
+      pass
+    elif sdkGetDeviceState(d)[0] != '00':
+      pass
     else:
-      time.sleep(22)
+      return True
+  # common process
   while t <= 3:
+    if t > 0:
+      raw_input('Please reset the device manually and reconnect the device and webservice!\n')
     if sdkGetDeviceState(d)[0] != '00':
       win32api.ShellExecute(0, 'open', stop, '', '', 1)  # shall be run stop and start executable and then getdevicestate
       time.sleep(4)
-      if os.system('tasklist|find /i "AuthTest_tool.exe"') == 0:
-        os.system('taskkill /IM AuthTest_tool.exe /F')
+     # if os.system('tasklist|find /i "AuthTest_tool.exe"') == 0:
+     #   os.system('taskkill /IM AuthTest_tool.exe /F')
       time.sleep(4)
       win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
       time.sleep(15)

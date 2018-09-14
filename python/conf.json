@@ -1,13 +1,8 @@
 {
-    "start": "C:\\Users\\user\\Desktop\\tools_Auth_20180705\\tools_Auth\\startservice.exe",
-    "stop": "C:\\Users\\user\\Desktop\\tools_Auth_20180705\\tools_Auth\\stopservice.exe",
+    "start": "C:\\Users\\user\\Desktop\\K300paywave\\K300paywave\\paywave\\webservice\\startWebService.bat",
+    "stop": "C:\\Users\\user\\Desktop\\K300paywave\\K300paywave\\paywave\\webservice\\stopWebService.bat",
     "resetsupport": "01",
-    "deviceID": ["1"], 
-
-    "BaseSettings":{
-        "font":1,
-        "size":2
-                   },
+    "deviceID": ["ref","1"],
 
 "coordinate":
 {

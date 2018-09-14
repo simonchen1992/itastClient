@@ -3,7 +3,8 @@ import time
 import json
 import numpy as np
 import itast.client as client
-from colorama import Fore, Back, Style
+from colorama import init, Fore, Back, Style
+#init(autoreset=True)
 
 #  establish robot arm connection
 eng = win32com.client.Dispatch("CAO.CaoEngine")
@@ -74,6 +75,8 @@ def init(sessionID, deviceID):
 #  setting - calibrate device 0C position
 def calibrate_setting(s, d):
     dutID = raw_input('Please input Device ID that you want to carlibrate. e.g. 1, 2, ref..\n')
+    while dutID not in d:
+        dutID = raw_input('Please input Device ID that you want to carlibrate. e.g. 1, 2, ref..\n')
     if raw_input('Do you want to suck another card?\n1. YES\n2. NO\n') == '1':
         rackIn = raw_input('Please enter rackIn dispenser number\n')
         raw_input('Please alter the robot panel to AUTO mode.\n')
@@ -82,7 +85,6 @@ def calibrate_setting(s, d):
         goto_rack(rackIn, device_orientation)
         takecard()
         robot_releasearm()
-    raw_input('Please alter the robot panel to MANUAL mode.\n')
     raw_input('Please calibrate the parallel between device and card, then calibrate the Z coordinate of DUT1.\n')
     ta = curpos.Value
     z = ta[2]
@@ -174,7 +176,8 @@ def robot_releasearm():
     Marvin.Execute("Motor", 0)
     Marvin.Execute("GiveArm", )
 
-def clear():
+# Robot exception handling
+def ex_handle():
     try:
         ctrl.Execute('ClearError')
     except:
@@ -253,11 +256,23 @@ def goto_DUT(pos, dutID):
 #  Robot - Moves down!
 def goto_DUT_tx(h, dutID):
     try:
+        # unit transfer: from cm to mm
+        h = h * 10
         ta = curpos.Value
         if h == 0:
             Marvin.Move(2, [[ta[0], ta[1], terminal[dutID][2] + h, ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
         else:
             Marvin.Move(2, [[ta[0], ta[1], terminal[dutID][2] + h - offset[dutID], ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
+    except:
+        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
+        ctrl.Execute('ClearError')
+        exit()
+
+#  Robot - Leave test position
+def leave():
+    try:
+        ta = curpos.Value
+        Marvin.Move(2, [[ta[0], ta[1], ta[2] + 150, ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
     except:
         print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
         ctrl.Execute('ClearError')
@@ -303,3 +318,5 @@ def points(s, n, ort):
 
 if __name__ == '__main__':
     init('1', ['1','ref'])
+    releasecard()
+

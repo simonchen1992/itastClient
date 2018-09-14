@@ -9,7 +9,7 @@ def startscan(port):
     count = ctrl.AddVariable("@QUEUE_SIZE")
     que = ctrl.AddVariable("@QUEUE")
     ctrl.Execute("RAW", "READON")
-    while count.Value <= 0 and i <= 10:
+    while count.Value <= 0 and i <= 20:
         i += 1
         time.sleep(0.5)
     if count.Value <= 0:

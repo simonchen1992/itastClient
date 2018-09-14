@@ -36,12 +36,14 @@ def promptyesno(msg):
 def promptFillSessionData(s):
     s['expedient'] = prompt("Expedient: ")
     s['owner'] = "Carlos GARCIA"
-    s['dut1_id'] = prompt("DUT 1 ID (or part number): ")
     s['dut1_name'] = prompt("DUT 1 Name (model): ")
+    s['dut1_id'] = prompt("DUT 1 ID (or part number): ")
     s['dut1_description'] = "Testing Device 1"
-    s['dut2_id'] = prompt("DUT 2 ID (or part number): ")
     s['dut2_name'] = prompt("DUT 2 Name (model): ")
+    s['dut2_id'] = prompt("DUT 2 ID (or part number): ")
     s['dut2_description'] = "Testing Device 2"
+    s['dutref_name'] = prompt("DUT ref Name (model): ")
+    s['dutref_id'] = prompt('DUT ref ID (or part number): ')
     s['dut1_offset'] = prompt("DUT 1 offset(mm) is: ")
     s['dut2_offset'] = prompt("DUT 2 offset(mm) is: ")
     s['notes'] = prompt("Any comment or notes shall be here: ")
@@ -80,6 +82,7 @@ def exec_vcasCommand(cmd, tx):
             pass
         else:
             exit('reset failure')
+        exec 'response = %s' % cmd
     return response
 
 # Initiate dispenser status
@@ -119,7 +122,7 @@ print NRposA
 # Initialize device configuration
 def sdk_initiate(dutID):
     itast.client.sdkSetConfigToDefault(dutID)  # prepare transaction procedure
-    itast.client.sdkSetConfig(11, 0, dutID)  # disable CVM limit check to force online transaction
+    itast.client.sdkSetConfig(3, 1, dutID)  # disable CVM limit check to force online transaction
     return itast.client.sdkGetConfig(dutID)
 
 def main_loop():
@@ -198,9 +201,9 @@ def main_loop():
                     attempt = 0
                     #  Determine test positions
                     posID = str(pos[3]) + pos[0]
-                    for string in NTpos:
-                        if string == posID:
-                            NTflag = True
+                    # for string in NTpos:
+                    #     if string == posID:
+                    #         NTflag = True
                     if NTflag and dutID != 'ref':
                         continue
                     #  Create test case: specified for one test height-position
@@ -227,29 +230,31 @@ def main_loop():
                         # execute testing on test height-positions
                         print "Testing " + posID + " of card " + card['vtf'] + ' on DUT' + dutID + str(attempt + 1)
                         tx = itast.client.getNewTx(sessionID, caseID, cardID, dutID, posID, '0000')
-                        robot.goto_DUT(pos, dutID)  # Goto test positions
-                        exec_vcasCommand("itast.client.sdkPrepareTransaction(tx, dutID)", tx)  # Prepare transaction
-                        robot.goto_DUT_tx(pos[3], dutID)  # Card falls down
-                        result = exec_vcasCommand("itast.client.sdkStartTransaction(amount, tx, dutID, config[dutID])", tx)[1][5:9]
+                        result = itast.client.sdkStartTransaction(amount,tx, dutID, config, pos, sessionID, caseID, data)[1][5:9]
+                        # robot.goto_DUT(pos, dutID)  # Goto test positions
+                        # exec_vcasCommand("itast.client.sdkPrepareTransaction(tx, dutID)", tx)  # Prepare transaction
+                        # robot.goto_DUT_tx(pos[3], dutID)  # Card falls down
+                        # result = exec_vcasCommand("itast.client.sdkStartTransaction(amount, tx, dutID, config[dutID])", tx)[1][5:9]
                         print result
                         txupdate = itast.client.TxVerdict(amount, result, txverdict, changeamount, config[dutID])
                         changeamount = txupdate[0]
                         amount = txupdate[1]
                         txverdict = txupdate[2]
                         print txverdict
+                        # Deal with EF05: Request reset
+                        if result == 'EF05':
+                            if resetsupport == "01":
+                                prompt('Please reset the device manually and reconnect the device and webservice!\n')
+                            else:
+                                itast.client.sdkResetDevice(dutID)
+                                time.sleep(20)
+                        # GetDebugLogs from last transaction
                         exec_vcasCommand("itast.client.sdkGetDebugLog(tx, dutID)", tx)  # Getdebuglog from last transaction
                         # Deal with 5A31: offline decline
                         if result == '5A31':
                             offlineflag = True
                             attempt = 0
                             continue
-                        # Deal with EF05: Request reset
-                        if result == 'EF05':
-                            if resetsupport == "01":
-                                prompt('Please reset the device manually and reconnect the device and webservice!')
-                            else:
-                                itast.client.sdkResetDevice(dutID)
-                                time.sleep(20)
                         attempt = attempt + 1
 
                         """
@@ -310,7 +315,7 @@ def main_loop():
                         attempt = 0
                         #  Determine test positions
                         posID = str(pos[3]) + pos[0]
-                        if pos[3] != 2:
+                        if posID not in ['2W', '2S', '2E', '2N']:
                             continue
                         #  Create test case: specified for one test height-position
                         case = itast.client.getNewCase(sessionID, cardID, dutID, posID)
@@ -318,11 +323,14 @@ def main_loop():
                         while attempt < 7:
                             print "Testing " + posID + " of card " + str(card['id']) + ' on DUT' + dutID + str(attempt + 1)
                             tx = itast.client.getNewTx(sessionID, caseID, cardID, dutID, posID, '0000')
-                            robot.goto_DUT(pos, dutID)  # Goto test positions
-                            exec_vcasCommand("itast.client.sdkPrepareTransaction(tx, dutID)", tx)  # Prepare transaction
-                            robot.goto_DUT_tx(pos[3], dutID)  # Card falls down
-                            result = exec_vcasCommand("itast.client.sdkStartTransaction(amount, tx, dutID, config[dutID])", tx)[1][
-                                     5:9]
+                            result = \
+                            itast.client.sdkStartTransaction(amount, tx, dutID, config, pos, sessionID, caseID, data)[
+                                1][5:9]
+                            # robot.goto_DUT(pos, dutID)  # Goto test positions
+                            # exec_vcasCommand("itast.client.sdkPrepareTransaction(tx, dutID)", tx)  # Prepare transaction
+                            # robot.goto_DUT_tx(pos[3], dutID)  # Card falls down
+                            # result = exec_vcasCommand("itast.client.sdkStartTransaction(amount, tx, dutID, config[dutID])", tx)[1][
+                            #          5:9]
                             print result
                             txupdate = itast.client.TxVerdict(amount, result, txverdict, changeamount, config[dutID])
                             changeamount = txupdate[0]
