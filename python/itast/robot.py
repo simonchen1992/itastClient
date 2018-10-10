@@ -3,6 +3,7 @@ import time
 import json
 import numpy as np
 import itast.client as client
+from os import system
 from colorama import init, Fore, Back, Style
 #init(autoreset=True)
 
@@ -22,16 +23,10 @@ curpos = Marvin.AddVariable("@CURRENT_POSITION")
 # add external speed
 extspd = Marvin.AddVariable("@EXTSPEED")
 
-def clear_error():
-    try:
-        ctrl.Execute('ClearError')
-    except:
-        print '\033[1;31;0mRobot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + '\033[0m'
-        exit()
-    print '\033[1;31;0mRobot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + '\033[0m'
+
 
 #  robot initialization
-def init(sessionID, deviceID):
+def init(session, deviceID):
     global terminal, dispenser, data, test_height, test_position, device_orientation, test_speed, offset
     with open("appconfig.json") as json_file:
         data = json.load(json_file)
@@ -41,7 +36,10 @@ def init(sessionID, deviceID):
     test_height = data["custom"]["test_height"]
     test_position = data["custom"]["test_position"]
     device_orientation = data["custom"]["orientation"]
-    offset = data["offset"]
+    sessionID = session['id']
+    offset = {}
+    for d in deviceID:
+        offset[d] = session["dut" + d + "_offset"]
     test_speed = extspd.Value
     setting = raw_input("--------------Please enter the robot setting number if you want to modify--------------\n"
                     "1. Current calibrated 0C position for all listed device is: \n" + Fore.RED +
@@ -54,16 +52,17 @@ def init(sessionID, deviceID):
                     Style.BRIGHT + "6. Start testing!!" + Style.RESET_ALL + "\n")
     while True:
         if setting == '1':
-            return calibrate_setting(sessionID, deviceID)
+            return calibrate_setting(session, deviceID)
         elif setting == '2':
-            return custom_testposition(sessionID, deviceID)
+            return custom_testposition(session, deviceID)
         elif setting == '3':
-            return orientation_setting(sessionID, deviceID)
+            return orientation_setting(session, deviceID)
         elif setting == '4':
-            return speed_setting(sessionID, deviceID)
+            return speed_setting(session, deviceID)
         elif setting == '5':
-            return default_setting(sessionID, deviceID)
+            return default_setting(session, deviceID)
         elif setting == '6':
+            raw_input('Please turn the robot panel to AUTO mode.\n')
             robot_takearm()
             client.getNewLog(sessionID, '', 'DUT1 Position 0C calibration', '', '', '')
             client.getNewLog(sessionID, '', 'reference device Position 0C calibration', '', '', '')
@@ -72,14 +71,27 @@ def init(sessionID, deviceID):
             setting = raw_input()
             continue
 
+# Robot exception handling
+def ex_handle():
+    try:
+        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
+        ctrl.Execute('ClearError')
+        if system('tasklist|find /i "Cao.exe"') == 0:
+          system('taskkill /IM Cao.exe /F')
+        raw_input('Press enter to exit')
+    except:
+        print '\033[1;31;0mRobot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + '\033[0m'
+        raw_input('Press enter to exit')
+        exit()
+
 #  setting - calibrate device 0C position
 def calibrate_setting(s, d):
     dutID = raw_input('Please input Device ID that you want to carlibrate. e.g. 1, 2, ref..\n')
     while dutID not in d:
         dutID = raw_input('Please input Device ID that you want to carlibrate. e.g. 1, 2, ref..\n')
     if raw_input('Do you want to suck another card?\n1. YES\n2. NO\n') == '1':
-        rackIn = raw_input('Please enter rackIn dispenser number\n')
-        raw_input('Please alter the robot panel to AUTO mode.\n')
+        rackIn = '1'  # can be choose if it need to be configured by user
+        raw_input('Please turn the robot panel to AUTO mode.\n')
         robot_takearm()
         sucflag.Value = 0
         goto_rack(rackIn, device_orientation)
@@ -167,22 +179,13 @@ def robot_takearm():
         Marvin.Execute("Motor", 1)
         Marvin.Change("Tool1")
     except:
-        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
-        ctrl.Execute('ClearError')
+        ex_handle()
         exit()
 
 #  Robot - release arm authority
 def robot_releasearm():
     Marvin.Execute("Motor", 0)
     Marvin.Execute("GiveArm", )
-
-# Robot exception handling
-def ex_handle():
-    try:
-        ctrl.Execute('ClearError')
-    except:
-        print '\033[1;31;0mRobot error Occured: ' + ctrl.Execute('GetCurErrorinfo',0)[1] + '\033[0m'
-        exit()
 
 #  Robot - goto Rack(dispenser)
 def goto_rack(rack_num, ort):
@@ -211,22 +214,25 @@ def goto_rack(rack_num, ort):
             raise Exception("Not reachable dispenser")
         Marvin.Move(2, [r, 'p', '@E'], 'SPEED=30')
     except:
-        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
-        Marvin.Execute("GiveArm")
+        ex_handle()
         exit()
 
 #  Robot - take the card
 def takecard():
-    i = 0
-    Marvin.Execute("Draw", [2, "V(0, 0, -180)", "speed = 10"])
-    while endflag.Value is True:
-        Marvin.Execute("Draw", [2, "V(0, 0, -1)", "SPEED = 10"])
-    sucflag.Value = 1
-    time.sleep(1.5)
-    while i < 20:
-        Marvin.Execute("Draw", [2, "V(0, 0, 1)", "SPEED = 10"])
-        i += 1
-    Marvin.Execute("Draw", [2, "V(0, 0, 185)", "speed = 10"])
+    try:
+        i = 0
+        Marvin.Execute("Draw", [2, "V(0, 0, -180)", "speed = 10"])
+        while endflag.Value is True:
+            Marvin.Execute("Draw", [2, "V(0, 0, -1)", "SPEED = 10"])
+        sucflag.Value = 1
+        time.sleep(1.5)
+        while i < 20:
+            Marvin.Execute("Draw", [2, "V(0, 0, 1)", "SPEED = 10"])
+            i += 1
+        Marvin.Execute("Draw", [2, "V(0, 0, 185)", "speed = 10"])
+    except:
+        ex_handle()
+        exit()
 
 #  Robot - release the card
 def releasecard():
@@ -236,8 +242,7 @@ def releasecard():
         time.sleep(1.5)
         Marvin.Execute("Draw", [2, "V( 0, 0, 192)", "speed = 10"])
     except:
-        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
-        Marvin.Execute("GiveArm")
+        ex_handle()
         exit()
 
 #  Robot - move to test positions
@@ -249,8 +254,7 @@ def goto_DUT(pos, dutID):
     try:
         Marvin.Move(2, [[terminal[dutID][0] + delta_x, terminal[dutID][1] + delta_y, terminal[dutID][2] + 150, terminal[dutID][3], terminal[dutID][4], terminal[dutID][5]], 'p', '@E'], 'SPEED=35')
     except:
-        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
-        ctrl.Execute('ClearError')
+        ex_handle()
         exit()
 
 #  Robot - Moves down!
@@ -264,8 +268,7 @@ def goto_DUT_tx(h, dutID):
         else:
             Marvin.Move(2, [[ta[0], ta[1], terminal[dutID][2] + h - offset[dutID], ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
     except:
-        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
-        ctrl.Execute('ClearError')
+        ex_handle()
         exit()
 
 #  Robot - Leave test position
@@ -274,8 +277,7 @@ def leave():
         ta = curpos.Value
         Marvin.Move(2, [[ta[0], ta[1], ta[2] + 150, ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
     except:
-        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
-        ctrl.Execute('ClearError')
+        ex_handle()
         exit()
 
 #  Generate testing points

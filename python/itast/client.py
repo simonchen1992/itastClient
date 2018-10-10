@@ -111,70 +111,109 @@ def getLogs(orderfield='id', order='desc', limit=0, start=0):
 
 # sdk
 
+# VCAS command watchdog method
+def watchdog(f):
+  def exec_vcasCommand(dutID, sessionID, caseID, data, *args, **kwargs):
+      response = f(*args, **kwargs)
+      if response[0] != '00':  # prepare transaction procedure
+          start = data["start"]  # start service address
+          stop = data["stop"]  # stop service address
+          resetsupport = data["resetsupport"]  # Device support reset function or not: 0 supported, 1 not supported
+          itast.client.getNewLog(sessionID, caseID, 'Execute refresh procedure', '', '', '')
+          if not itast.client.reset(dutID, stop, start, resetsupport):
+              exit('reset failure')
+          response = f(*args, **kwargs)
+          if response[0] != '00':
+            exit('Cannot receive proper response even after reset procedure.')
+      return response
+  return exec_vcasCommand
+
+@watchdog
 def sdkGetConfig(d):
   return requestJson('/sdk/getconfig'+d)
 
+@watchdog
 def sdkSetConfigToDefault(d):
   return requestJson('/sdk/setconfigtodefault' + d)
 
+@watchdog
 def sdkSetConfig(tag, value, d):
-  # TODO: this method is not implemented in the the server side
-  print "SetConfig not implemented"
   return requestJson('/sdk/setconfig' + d + '?' + 'tag=' + str(tag) + '&' + 'value=' + str(value))
+
 
 def sdkPrepareTransaction(tx,d):
   return requestJson('/sdk/preparetransaction' + d + '?' + urlencode(tx))
 
-def sdkStartTransaction(amount, tx, dutID, config, pos, sessionID,caseID, data):  # changed for asyn way
-  max_waiting_rffield = 1.5
+
+def sdkStartTransaction(amount, tx, d):  # changed for asyn way
+  return requestJson('/sdk/starttransaction' + d + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
+
+@watchdog
+def sdkStartTransactionAsync(data, amount, tx, d, pos):
   from itast.robot import goto_DUT_tx, goto_DUT, leave
+  max_waiting_rffield = 2
+  err_response = ['01', '']  # simulate return code 01 and no return value
   class MyThread(threading.Thread):
     def __init__(self, func, args=()):
       threading.Thread.__init__(self)
       self.func = func
       self.args = args
-
     def run(self):
       self.result = self.func(*self.args)
-
     def get_result(self):
       try:
         return self.result
       except Exception as e:
         print e
-  def start_tx():
-    results = requestJson('/sdk/starttransaction' + dutID + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
-    return results
-  def robot_leave():
-    leave()
-  def stop_tx():
-    exec_vcasCommand("itast.client.sdkStopCurrentTransaction(tx, dutID)", tx, dutID, sessionID,caseID, data)
 
-  goto_DUT(pos, dutID)  # Goto test positions
-  exec_vcasCommand("itast.client.sdkPrepareTransaction(tx, dutID)", tx, dutID, sessionID,caseID, data)  # Prepare transaction
+  def start_tx():
+    results = sdkStartTransaction(amount, tx, d)
+    return results
+
+  def stop_tx():
+    sdkStopCurrentTransaction(tx, d)
+
+  goto_DUT(pos, d)  # Goto test positions
+  if sdkPrepareTransaction(tx, d)[0] != '00':
+    return err_response
   t1 = MyThread(start_tx, args='')
-  t3 = threading.Thread(target=stop_tx, args='')
+  t2 = threading.Thread(target=stop_tx, args='')
   t1.start()
   t1.join(max_waiting_rffield)
-  goto_DUT_tx(pos[3], dutID)  # Card falls down
-  print "start test:", time.ctime()
+  goto_DUT_tx(pos[3], d)  # Card falls down
+  print time.ctime()
   t1.join(1)
+  print time.ctime()
+  leave()
   if t1.isAlive():
-    print "moveup:", time.ctime()
-    robot_leave()
-    t1.join(8)
+    t1.join(13 - 1 - max_waiting_rffield)  # shall be improved: refer to timeout time
     if t1.isAlive():
-      print "stop test:", time.ctime()
-      t3.start()
+      t2.start()
       t1.join()
+      if t2.isAlive():
+        t2.join()
+  response = t1.get_result()
+  # Deal with EF05: Request reset
+  if response[1][5:9] == 'EF05':
+    if data["resetsupport"] == "01":
+      raw_input('Please reset the device manually and reconnect the device and webservice!\n')
+    else:
+      itast.client.sdkResetDevice(d)
+      time.sleep(20)
+  # GetDebugLogs from last transaction
+  if itast.client.sdkGetDebugLog(tx, d)[0] != '00':  # Getdebuglog from last transaction
+    return err_response
   return t1.get_result()
+
 
 def sdkStopCurrentTransaction(tx, d):
   return requestJson('/sdk/stopcurrenttransaction' + d + '?' + urlencode(tx))
 
+
 def sdkGetDebugLog(tx, d):
   return requestJson('/sdk/getdebuglog' + d + '?' + urlencode(tx))
 
+@watchdog
 def sdkClearLogs(tx, d):
   return requestJson('/sdk/clearlogs' + d + '?' + urlencode(tx))
 
@@ -184,50 +223,12 @@ def sdkGetDeviceState(d):
 def sdkResetDevice(d):
   return requestJson('/sdk/resetdevice' + d)
 
-
-# VCAS command watchdog method
-def exec_vcasCommand(cmd, tx, dutID, sessionID, caseID, data):
-    start = data["start"]  # start service address
-    stop = data["stop"]  # stop service address
-    resetsupport = data["resetsupport"]  # Device support reset function or not: 0 supported, 1 not supported
-    response = []
-    exec 'response = %s' % cmd
-    while response[0] != '00':  # prepare transaction procedure
-        itast.client.getNewLog(sessionID, caseID, 'Execute refresh procedure', '', '', '')
-        if itast.client.reset('1', stop, start, resetsupport):
-            pass
-        else:
-            exit('reset failure')
-        exec 'response = %s' % cmd
-    return response
-
-
-# robot
-def robotDuttx(dutID, Z, offset):
-  txposition = {'z': Z, 'dut1_offset': offset}
-  return requestJson('/robot/txDUT' + dutID + '?' + urlencode(txposition))
-
-#dispenser
-def dispenserInitial(d1, d2, d3, d4):
-  initial = {'d1': d1, 'd2': d2, 'd3': d3, 'd4': d4}
-  return requestJson('/dispenser/initiate' + '?' + urlencode(initial))
-
-def dispenserMov(id, dis, dir):
-  return requestJson('/dispenser/rack' + id + dir + '?' + 'distance=' + dis)
-
-# qr scanner
-def qrStartscan():
-  return requestJson('/qrscan/startscan')
-
-def qrStopscan():
-  return requestJson('/qrscan/stopscan')
-
 # case verdict calculation
 def TxVerdict(amount, result, txverdict, changeamount, config):  # TODO: EF00
   devicetype = config[1].split('\n')[0][5:]
   if (result == '5931') or (result == '3030'):
     txverdict.append('PASS')
-  elif (result == 'EF03') or (result == 'EF04') or (result == 'EF05'):
+  elif (result == 'EF03') or (result == 'EF04') or (result == 'EF05') or (result == 'EF00'):
     txverdict.append('CF')
   elif (result == 'EF01') or (result == 'EF02') or (result == 'EF06'):
     txverdict.append('TF')
@@ -293,6 +294,14 @@ def reset(d, stop, start, resetsupport):  # Input data: device number, startserv
     else:
       return True
 
+#dispenser
+def dispenserInitial(d1, d2, d3, d4):
+  initial = {'d1': d1, 'd2': d2, 'd3': d3, 'd4': d4}
+  return requestJson('/dispenser/initiate' + '?' + urlencode(initial))
 
+def dispenserMov(id, dis, dir):
+  return requestJson('/dispenser/rack' + id + dir + '?' + 'distance=' + dis)
 
-
+if __name__ == '__main__':
+  sdkSetConfig('1', '2', '', {}, 3, 1, '1')
+  #sdkPrepareTransaction('1', '2', '', {}, {}, '1')
