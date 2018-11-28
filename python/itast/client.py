@@ -151,7 +151,7 @@ def sdkStartTransaction(amount, tx, d):  # changed for asyn way
 @watchdog
 def sdkStartTransactionAsync(data, amount, tx, d, pos):
   from itast.robot import goto_DUT_tx, goto_DUT, leave
-  max_waiting_rffield = 2
+  max_waiting_rffield = 3
   err_response = ['01', '']  # simulate return code 01 and no return value
   class MyThread(threading.Thread):
     def __init__(self, func, args=()):
@@ -181,10 +181,11 @@ def sdkStartTransactionAsync(data, amount, tx, d, pos):
   t1.start()
   t1.join(max_waiting_rffield)
   goto_DUT_tx(pos[3], d)  # Card falls down
-  print time.ctime()
+  down_time1 = time.time()
   t1.join(1)
-  print time.ctime()
+  down_time2 = time.time()
   leave()
+  print 'Down Time in test position is: ' + str(down_time2 - down_time1) + ' seconds'
   if t1.isAlive():
     t1.join(13 - 1 - max_waiting_rffield)  # shall be improved: refer to timeout time
     if t1.isAlive():

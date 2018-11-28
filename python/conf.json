@@ -1,8 +1,9 @@
 {
-    "start": "C:\\Users\\user\\Desktop\\K300paywave\\K300paywave\\paywave\\webservice\\startWebService.bat",
-    "stop": "C:\\Users\\user\\Desktop\\K300paywave\\K300paywave\\paywave\\webservice\\stopWebService.bat",
+    "start": "C:\\Users\\user\\Desktop\\DATECS\\SDK\\VisaService.exe",
+    "stop": "C:\\Users\\user\\Desktop\\DATECS\\SDK\\VisaService.exe",
     "resetsupport": "01",
-    "deviceID": ["ref","1"],
+    "deviceID": ["1"],
+
 
 "coordinate":
 {

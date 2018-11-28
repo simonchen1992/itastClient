@@ -239,6 +239,7 @@ def releasecard():
     try:
         Marvin.Execute("Draw", [2, "V( 0, 0, -192)", "speed = 10"])
         sucflag.Value = 0
+        Marvin.Execute("Draw", [2, "V( 0, 0, 5)", "speed = 10"])
         time.sleep(1.5)
         Marvin.Execute("Draw", [2, "V( 0, 0, 192)", "speed = 10"])
     except:
@@ -319,6 +320,9 @@ def points(s, n, ort):
     return L
 
 if __name__ == '__main__':
-    init('1', ['1','ref'])
+    init({'id': '1','dut1_offset':0}, '1')
+    goto_rack('1','Forward')
+    takecard()
+    goto_rack('2','Forward')
     releasecard()
 

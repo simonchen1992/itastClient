@@ -315,7 +315,6 @@ def main_loop():
                         while attempt < 7:
                             print "Testing " + posID + " of card " + str(card['id']) + ' on DUT' + dutID + str(attempt + 1)
                             tx = itast.client.getNewTx(sessionID, caseID, cardID, dutID, posID, '0000')
-                            print tx
                             result = \
                             itast.client.sdkStartTransactionAsync(dutID, sessionID, caseID, data, data, amount, tx, dutID, pos)[1][5:9]
                             # robot.goto_DUT(pos, dutID)  # Goto test positions
