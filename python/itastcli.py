@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-from urllib import urlencode
 from sys import stdin
 import itast.settings
 import itast.debug
@@ -8,18 +7,22 @@ import itast.qrscan as qrscan
 import itast.robot as robot
 import time
 import json
+from colorama import init, Fore, Back, Style
+#init(autoreset=True)
+
+RACK_IN = ['1']  # RFU
+RACK_OUT = ['2']  # RFU
 
 # read configuration from json file
 with open('conf.json') as json_file:
-    data = json.load(json_file)
-start = data["start"]  # start service address
-stop = data["stop"]  # stop service address
-resetsupport = data["resetsupport"]  # Device support reset function or not: 0 supported, 1 not supported
-deviceID = data["deviceID"]  # list all dutID
-portQR = data["portnumber"]["qrscan1"]  # port number of qr scanner (only care about 1)
+    conf = json.load(json_file)
+deviceID = conf["deviceID"]  # list all dutID
+portQR = conf["portnumber"]["qrscan1"]  # port number of qr scanner (only care about 1)
+cardHeight = conf['cardHeight']
 
-Rack_in_number = ['1']  # RFU
-Rack_out_number = ['2']  # RFU
+def raiseEx(msg):
+    raw_input(Fore.RED + str(msg) + Style.RESET_ALL)
+    exit(1)
 
 def prompt(msg):
     print msg
@@ -50,17 +53,7 @@ def promptFillSessionData(s):
     s['visa_vtf'] = prompt("Visa VTF: ")
     s['official_run'] = True
 
-# Initiate the current session
-newSession = prompt('Do you want to create a new session? If yes, please enter yes. If no, please enter the session number:').strip('\n')
-if newSession == 'yes':
-    session = itast.client.getNewSession()
-    promptFillSessionData(session)
-    session = itast.client.updateSession(session)
-else:
-    session = itast.client.getSession(newSession)
-sessionID = session['id']
-
-# explain test positions to codes
+# explain test positions from VISA template
 def testposition(st):
     ntpos = str(st).replace('NT@', '')
     ntpos = ntpos.replace(' ', '')
@@ -71,19 +64,6 @@ def testposition(st):
     ntpos = ntpos.replace('4A', '4C,4N,4S,4E,4W')
     ntpos = ntpos.split(',')
     return ntpos
-
-# VCAS command watchdog method
-def exec_vcasCommand(cmd, tx):
-    response = []
-    exec 'response = %s' % cmd
-    while response[0] != '00':  # prepare transaction procedure
-        itast.client.getNewLog(sessionID, caseID, 'Execute refresh procedure', '', '', '')
-        if itast.client.reset('1', stop, start, resetsupport):
-            pass
-        else:
-            exit('reset failure')
-        exec 'response = %s' % cmd
-    return response
 
 # Initiate dispenser status
 def dispenser_initiate():
@@ -102,63 +82,71 @@ def dispenser_initiate():
         prompt('As this is a new session, you shall put a dummy card at the top')
     return d
 
+# Initialize device configuration
+def sdk_initiate(dutID):
+    itast.client.sdkSetConfigToDefault(dutID, sessionID, '', dutID)  # prepare transaction procedure
+    itast.client.sdkSetConfig(dutID, sessionID, '', 3, 1, dutID)  # disable CVM limit check to force online transaction
+    return itast.client.sdkGetConfig(dutID, sessionID, '', dutID)
+
+# Initiate the current session
+newSession = prompt('Do you want to create a new session? If yes, please enter yes. If no, please enter the session number:').strip('\n')
+if newSession == 'yes':
+    session = itast.client.getNewSession()
+    promptFillSessionData(session)
+    session = itast.client.updateSession(session)
+else:
+    session = itast.client.getSession(newSession)
+sessionID = session['id']
+
 
 # Test run of robot to find unaddressable positions (only care about dut1)
 # Take card process of test run need to be improved
 # if newSession == 'yes':
 #   itast.client.requestJson('/robot/gotoRack1')
 #   itast.client.requestJson('/robot/takeCard')
-#   #itast.client.dispenserMov('1','2.9','up')
+#   #itast.client.dispenserMov('1', cardHeight,'up')
 #   itast.client.requestJson('/robot/testrunDUT1'+ '?' + 'id_test_session=' + str(sessionID))
 #   itast.client.requestJson('/robot/gotoRack2')
 #   itast.client.requestJson('/robot/releaseCard')
-#   itast.client.dispenserMov('2', '2.8', 'down')
+#   itast.client.dispenserMov('2', cardHeight, 'down')
 #   itast.client.getNewLog(sessionID,caseID,'Addressing of all positions', '', '', '')
 #   session = itast.client.getSession(sessionID)
 NRposA = testposition(session['dut1_nrpos'])
 print "Not reachable positions are:"
 print NRposA
 
-# Initialize device configuration
-def sdk_initiate(dutID):
-    itast.client.sdkSetConfigToDefault(dutID, sessionID, '', data, dutID)  # prepare transaction procedure
-    itast.client.sdkSetConfig(dutID, sessionID, '', data, 3, 1, dutID)  # disable CVM limit check to force online transaction
-    return itast.client.sdkGetConfig(dutID, sessionID, '', data, dutID)
-
 def main_loop():
     global dutID, caseID, amount, config
     # Initialize the robot arm
-    device_orientation = robot.init(session, deviceID)
+    robot.init(session, deviceID)
     # Initialize dispenser
-    cardInrack = dispenser_initiate()
+    cardNumInrack = dispenser_initiate()
     #  Initialize VCAS configuration
     config = {}
     for dutID in deviceID:
         config[dutID] = sdk_initiate(dutID)
 
     """
-        If there is mulitiple number of dispenser,
-        Divide them into rackIn dispenser and rackOut dispenser
+        If there are more than one dispensers as RACK_IN (RACK_OUT must be one now),
+        Pick cards for each RAIN_IN dispenser
     """
-    for rackIn, rackOut in zip(Rack_in_number, Rack_out_number):
-
-        """
-        Collect all cards which has been put on rackIn dispenser:
-        pick up and recognize the card"""
-        for num in range(0, int(cardInrack[rackIn])):
+    #  Traversal for dispensers
+    for rackIn, rackOut in zip(RACK_IN, RACK_OUT):
+        #  Traversal for cards
+        for temp in range(0, int(cardNumInrack[rackIn])):
             #  Flag: Reset defective flag
             defectiveflag = False
             #  Pick up and recognize card by qr scanner
-            robot.goto_rack(rackIn, device_orientation)
+            robot.goto_rack(rackIn)
             qr1 = qrscan.multiscan(portQR, 20)
-            itast.client.getNewLog(sessionID, '', 'Card check and identification', '', '', '')  # record log in database
+            itast.client.getNewLog(sessionID, '', 'Card check and identification')  # record log in database
             robot.takecard()
             qr2 = qrscan.startscan(portQR)
             if qr1 == qr2:
-                itast.client.getNewLog(sessionID, '', 'Failure in card pickup', '', '', '')  # record log in database
-                exit()
-            itast.client.getNewLog(sessionID, '', 'Successful pickup of the card', '', '', '')  # record log in database
-            itast.client.dispenserMov(rackIn, '2.8', 'up')
+                itast.client.getNewLog(sessionID, '', 'Failure in card pickup')  # record log in database
+                raiseEx('Failure in card pickup')
+            itast.client.getNewLog(sessionID, '', 'Successful pickup of the card')  # record log in database
+            itast.client.dispenserMov(rackIn, cardHeight, 'up')
             #  get the card information from database
             card = itast.client.getCard(qr1)
             cardID = card['id']
@@ -166,40 +154,37 @@ def main_loop():
             NTpos.extend(NRposA)  # the return value of "expend" is None, can only be used in this way
 
             """
-                If there is multiple device under test,
-                Divide them into DUT and reference device
+                If there are multiple devices under test,
+                Each card needs to be tested in all devices (Device_Under_Test and Reference_Device)
             """
-            # Execute for all device listed in json file
+            # Traversal for all devices to be test, configured in json file
             for dutID in deviceID:
-                #  defective card shall not be tested by DUT
                 if defectiveflag:
                   break
-                #  Flag: Reset breakflag flag
-                breakflag = False
-                # initial offline decline flag, thig flag is only used to mark test case in database
-                offlineflag = False
-                #  Flag: Reset the flag to determine if 2 is needed to be test
-                passflag = False
-                failInthreeflag = False
+                #  Initial flags
+                breakflag = False  # This flag will be set to true when one position is tested with verdict
+                offlineflag = False  # This flag is only used to mark test case in database
+                passflag = False  # This flag is to determine if z=2 needs to be tested
+                failInthreeflag = False  # This flag is to determine if z=2 needs to be tested
                 #  Parameter: Reset transaction parameter, shall be reset after change device
                 changeamount = 0
                 amount = 0.01
+                #  BAD CASE: SHALL NOT HAPPEN IN REGULAR OPERATION
                 if card['active'] != 1:
                     break
                 """
                   Collect all test positions which is customer by engineer,
                   In this loop will execute test on all required test height-positions for one device
                 """
-                # pending to check if device is qvsdc only
-                for pos in robot.points(1, 40, device_orientation):
+                #  Traversal for positions
+                for pos in robot.points(1, 40):
                     if breakflag:
                         break
-                    # Flag: Reset not-tested-position flag
-                    NTflag = False
-                    #  Parameter: Reset transaction result, shall be reset after move positions
-                    txverdict = []
+                    #  Parameter: Reset transaction result, shall be reset after robot move position
+                    posVerdict = []
                     attempt = 0
                     #  Determine test positions
+                    NTflag = False
                     posID = str(pos[3]) + pos[0]
                     for string in NTpos:
                         if string == posID:
@@ -228,19 +213,15 @@ def main_loop():
                           This is common process for all DUT.
                         """
                         # execute testing on test height-positions
-                        print "Testing " + posID + " of card " + card['vtf'] + ' on DUT' + dutID + str(attempt + 1)
+                        print "Testing " + posID + " of card " + card['id'] + ' on DUT' + dutID + str(attempt + 1)
                         tx = itast.client.getNewTx(sessionID, caseID, cardID, dutID, posID, '0000')
-                        result = itast.client.sdkStartTransactionAsync(dutID, sessionID, caseID, data, data, amount, tx, dutID, pos)[1][5:9]
-                        # robot.goto_DUT(pos, dutID)  # Goto test positions
-                        # exec_vcasCommand("itast.client.sdkPrepareTransaction(tx, dutID)", tx)  # Prepare transaction
-                        # robot.goto_DUT_tx(pos[3], dutID)  # Card falls down
-                        # result = exec_vcasCommand("itast.client.sdkStartTransaction(amount, tx, dutID, config[dutID])", tx)[1][5:9]
+                        result = itast.client.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, dutID, pos)[1][5:9]
                         print result
-                        txupdate = itast.client.TxVerdict(amount, result, txverdict, changeamount, config[dutID])
+                        txupdate = itast.client.genVerdict(amount, result, posVerdict, changeamount, config[dutID])
                         changeamount = txupdate[0]
                         amount = txupdate[1]
-                        txverdict = txupdate[2]
-                        print txverdict
+                        posVerdict = txupdate[2]
+                        print posVerdict
 
                         # Deal with 5A31: offline decline
                         if result == '5A31':
@@ -254,16 +235,16 @@ def main_loop():
                         """
                         # card defective test with a reference device
                         if dutID == 'ref':
-                            if txverdict.count('PASS') >= 1:
+                            if posVerdict.count('PASS') >= 1:
                                 print "this card functions correctly"
                                 breakflag = True
                                 itast.client.getNewLog(sessionID, caseID, 'Test run completion', '', '', '')
                                 break
-                            elif txverdict.count('NT') >= 1:
+                            elif posVerdict.count('NT') >= 1:
                             # if reference device cannot deal with online transaction, stop testing until manual investigation
                                 case['manual'] = '1'
                                 itast.client.updateCase(case)
-                                raise Exception('Reference device failed')
+                                raiseEx('Reference device failed')
                             elif posID == '4C':   # if all position failure
                                 print "this card is marked as defective, discard official testing"
                                 breakflag = True
@@ -279,7 +260,7 @@ def main_loop():
                           This process is only for testing device: DUT1, DUT2, etc...
                         """
                         # official testing with DUT 1 and 2
-                        if txverdict.count('PASS') >= 5:
+                        if posVerdict.count('PASS') >= 5:
                             if offlineflag:
                                 case['comments'] = 'Transaction forced with Online Approval. With a standard amount (i.e. 0.01) ' \
                                                 'transaction is attempt to be offline but the outcome is declined offline ' \
@@ -288,10 +269,10 @@ def main_loop():
                             case['verdict'] = 'P'
                             itast.client.updateCase(case)
                             break
-                        if (txverdict.count('CF') + txverdict.count('TF')) >= 3:
+                        if (posVerdict.count('CF') + posVerdict.count('TF')) >= 3:
                             if pos[3] == 3:
                                 failInthreeflag = True
-                            if txverdict.count('CF') >= 3:
+                            if posVerdict.count('CF') >= 3:
                                 case['verdict'] = 'CF'
                                 itast.client.updateCase(case)
                             else:
@@ -301,14 +282,10 @@ def main_loop():
 
                 # repeat all positions for Z=2 if appears fail in Z=3
                 if passflag and failInthreeflag:
-                    for pos in robot.points(1, 40, device_orientation):
+                    for posID in ['2W', '2S', '2E', '2N']:
                         #  Parameter: Reset transaction result, shall be reset after move positions
-                        txverdict = []
+                        posVerdict = []
                         attempt = 0
-                        #  Determine test positions
-                        posID = str(pos[3]) + pos[0]
-                        if posID not in ['2W', '2S', '2E', '2N']:
-                            continue
                         #  Create test case: specified for one test height-position
                         case = itast.client.getNewCase(sessionID, cardID, dutID, posID)
                         caseID = case['id']
@@ -316,22 +293,17 @@ def main_loop():
                             print "Testing " + posID + " of card " + str(card['id']) + ' on DUT' + dutID + str(attempt + 1)
                             tx = itast.client.getNewTx(sessionID, caseID, cardID, dutID, posID, '0000')
                             result = \
-                            itast.client.sdkStartTransactionAsync(dutID, sessionID, caseID, data, data, amount, tx, dutID, pos)[1][5:9]
-                            # robot.goto_DUT(pos, dutID)  # Goto test positions
-                            # exec_vcasCommand("itast.client.sdkPrepareTransaction(tx, dutID)", tx)  # Prepare transaction
-                            # robot.goto_DUT_tx(pos[3], dutID)  # Card falls down
-                            # result = exec_vcasCommand("itast.client.sdkStartTransaction(amount, tx, dutID, config[dutID])", tx)[1][
-                            #          5:9]
+                            itast.client.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, dutID, pos)[1][5:9]
                             print result
-                            txupdate = itast.client.TxVerdict(amount, result, txverdict, changeamount, config[dutID])
+                            txupdate = itast.client.genVerdict(amount, result, posVerdict, changeamount, config[dutID])
                             changeamount = txupdate[0]
                             amount = txupdate[1]
-                            txverdict = txupdate[2]
-                            print txverdict
+                            posVerdict = txupdate[2]
+                            print posVerdict
                             attempt = attempt + 1
 
                             # official testing with DUT 1 and 2
-                            if txverdict.count('PASS') >= 5:
+                            if posVerdict.count('PASS') >= 5:
                                 if offlineflag:
                                     case['comments'] = 'Transaction forced with Online Approval. With a standard amount (i.e. 0.01) ' \
                                                       'transaction is attempt to be offline but the outcome is declined offline ' \
@@ -339,17 +311,17 @@ def main_loop():
                                 case['verdict'] = 'P'
                                 itast.client.updateCase(case)
                                 break
-                            if (txverdict.count('CF') + txverdict.count('TF')) >= 3:
-                                if txverdict.count('CF') >= 3:
+                            if (posVerdict.count('CF') + posVerdict.count('TF')) >= 3:
+                                if posVerdict.count('CF') >= 3:
                                     case['verdict'] = 'CF'
                                     itast.client.updateCase(case)
                                 else:
                                     case['verdict'] = 'TF'
                                     itast.client.updateCase(case)
                                 break
-            robot.goto_rack(rackOut, device_orientation)
+            robot.goto_rack(rackOut)
             robot.releasecard()
-            itast.client.dispenserMov(rackOut, '2.8', 'down')
+            itast.client.dispenserMov(rackOut, cardHeight, 'down')
             itast.client.getNewLog(sessionID, caseID, 'Card in position and withdraw', '', '', '')
     robot.robot_releasearm()
 

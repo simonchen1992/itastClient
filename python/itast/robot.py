@@ -24,18 +24,17 @@ curpos = Marvin.AddVariable("@CURRENT_POSITION")
 extspd = Marvin.AddVariable("@EXTSPEED")
 
 
-
 #  robot initialization
 def init(session, deviceID):
-    global terminal, dispenser, data, test_height, test_position, device_orientation, test_speed, offset
+    global terminal, dispenser, appconfig, test_height, test_position, device_orientation, test_speed, offset
     with open("appconfig.json") as json_file:
-        data = json.load(json_file)
+        appconfig = json.load(json_file)
     #  fetch robot coordinate from appconfigiguration file
-    terminal = data["coordinate"]["dut"]
-    dispenser = data["coordinate"]["dispenser"]
-    test_height = data["custom"]["test_height"]
-    test_position = data["custom"]["test_position"]
-    device_orientation = data["custom"]["orientation"]
+    terminal = appconfig["coordinate"]["dut"]
+    dispenser = appconfig["coordinate"]["dispenser"]
+    test_height = appconfig["custom"]["test_height"]
+    test_position = appconfig["custom"]["test_position"]
+    device_orientation = appconfig["custom"]["orientation"]
     sessionID = session['id']
     offset = {}
     for d in deviceID:
@@ -66,7 +65,6 @@ def init(session, deviceID):
             robot_takearm()
             client.getNewLog(sessionID, '', 'DUT1 Position 0C calibration', '', '', '')
             client.getNewLog(sessionID, '', 'reference device Position 0C calibration', '', '', '')
-            return device_orientation
         else:
             setting = raw_input()
             continue
@@ -80,9 +78,10 @@ def ex_handle():
           system('taskkill /IM Cao.exe /F')
         raw_input('Press enter to exit')
     except:
-        print '\033[1;31;0mRobot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + '\033[0m'
+        print(Fore.RED + 'Robot error Occured: ' + ctrl.Execute('GetCurErrorinfo', 0)[1] + Style.RESET_ALL)
         raw_input('Press enter to exit')
-        exit()
+    finally:
+        exit(1)
 
 #  setting - calibrate device 0C position
 def calibrate_setting(s, d):
@@ -107,9 +106,9 @@ def calibrate_setting(s, d):
     # x = float(input('please ipuut X coordinate: '))
     # y = float(input('please ipuut Y coordinate: '))
     # z = float(input('please ipuut Z coordinate: '))
-    data["coordinate"]["dut"][dutID][0:3] = [x, y, z]
+    appconfig["coordinate"]["dut"][dutID][0:3] = [x, y, z]
     with open("appconfig.json", 'w') as json_file:
-        json_file.write(json.dumps(data))
+        json_file.write(json.dumps(appconfig))
     return init(s, d)
 
 # setting - custom testing height vs positions
@@ -132,19 +131,19 @@ def custom_testposition(s, d):
             if i not in [0, 10, 13, 16, 19]:
                 xyflag = False
                 break
-    data["custom"]["test_height"] = Z
-    data["custom"]["test_position"] = XY
+    appconfig["custom"]["test_height"] = Z
+    appconfig["custom"]["test_position"] = XY
     with open("appconfig.json", 'w') as json_file:
-        json_file.write(json.dumps(data))
+        json_file.write(json.dumps(appconfig))
     return init(s, d)
 
 #  setting - device orientation
 def orientation_setting(s, d):
     ort = "Forward" if raw_input("Does the device face to the operator?\n1. YES, it's face to the operator.\n"
                              "2. NO, it's face to the robot.\n") != '2' else "Backward"
-    data["custom"]["orientation"] = ort
+    appconfig["custom"]["orientation"] = ort
     with open("appconfig.json", 'w') as json_file:
-        json_file.write(json.dumps(data))
+        json_file.write(json.dumps(appconfig))
     return init(s, d)
 
 #  setting - robot external speed
@@ -155,21 +154,20 @@ def speed_setting(s, d):
         while speed <= 0 or speed > 100:
             speed = int(raw_input('Please input the robot external speed (between 0 and 100):\n'))
     except ValueError as e:
-        print(e)
-        print('\033[1;31;0mTry to only enter a number/float.\n')
-        raw_input()
+        raw_input(e)
+        exit(1)
     Marvin.Execute('ExtSpeed', [speed, 100, 100])
     return init(s, d)
 
 #  setting - restore default settings
 def default_setting(s, d):
-    data["custom"]["test_height"] = [0, 2, 3, 4]
-    data["custom"]["test_position"] = [0, 10, 13, 16, 19]
-    data["interval"] = 1.2
+    appconfig["custom"]["test_height"] = [0, 2, 3, 4]
+    appconfig["custom"]["test_position"] = [0, 10, 13, 16, 19]
+    appconfig["interval"] = 1.2
     Marvin.Execute('ExtSpeed', [70, 100, 100])
-    data["custom"]["orientation"] = 'Forward'
+    appconfig["custom"]["orientation"] = 'Forward'
     with open("appconfig.json", 'w') as json_file:
-        json_file.write(json.dumps(data))
+        json_file.write(json.dumps(appconfig))
     return init(s, d)
 
 #  Robot - take arm authority
@@ -180,7 +178,6 @@ def robot_takearm():
         Marvin.Change("Tool1")
     except:
         ex_handle()
-        exit()
 
 #  Robot - release arm authority
 def robot_releasearm():
@@ -188,8 +185,9 @@ def robot_releasearm():
     Marvin.Execute("GiveArm", )
 
 #  Robot - goto Rack(dispenser)
-def goto_rack(rack_num, ort):
-    tolerance = 1 if (ort != 'Forward') else 0  # make up the difference if card is in opposite direction
+def goto_rack(rack_num):
+    global device_orientation
+    tolerance = 1 if (device_orientation != 'Forward') else 0  # make up the difference if card is in opposite direction
     try:
         curpos_ta = curpos.Value
         r = dispenser[str(rack_num)]
@@ -215,7 +213,6 @@ def goto_rack(rack_num, ort):
         Marvin.Move(2, [r, 'p', '@E'], 'SPEED=30')
     except:
         ex_handle()
-        exit()
 
 #  Robot - take the card
 def takecard():
@@ -232,7 +229,6 @@ def takecard():
         Marvin.Execute("Draw", [2, "V(0, 0, 185)", "speed = 10"])
     except:
         ex_handle()
-        exit()
 
 #  Robot - release the card
 def releasecard():
@@ -244,7 +240,6 @@ def releasecard():
         Marvin.Execute("Draw", [2, "V( 0, 0, 192)", "speed = 10"])
     except:
         ex_handle()
-        exit()
 
 #  Robot - move to test positions
 def goto_DUT(pos, dutID):
@@ -256,7 +251,6 @@ def goto_DUT(pos, dutID):
         Marvin.Move(2, [[terminal[dutID][0] + delta_x, terminal[dutID][1] + delta_y, terminal[dutID][2] + 150, terminal[dutID][3], terminal[dutID][4], terminal[dutID][5]], 'p', '@E'], 'SPEED=35')
     except:
         ex_handle()
-        exit()
 
 #  Robot - Moves down!
 def goto_DUT_tx(h, dutID):
@@ -270,7 +264,6 @@ def goto_DUT_tx(h, dutID):
             Marvin.Move(2, [[ta[0], ta[1], terminal[dutID][2] + h - offset[dutID], ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
     except:
         ex_handle()
-        exit()
 
 #  Robot - Leave test position
 def leave():
@@ -279,10 +272,10 @@ def leave():
         Marvin.Move(2, [[ta[0], ta[1], ta[2] + 150, ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
     except:
         ex_handle()
-        exit()
 
 #  Generate testing points
-def points(s, n, ort):
+def points(s, n):
+    global device_orientation
     i = 1
     L = []
     for z in test_height:
@@ -292,13 +285,13 @@ def points(s, n, ort):
         for xy in test_position:
             r = 15 if (xy // 10 == 1) else 0
             if xy % 10 == 0:
-                angle = 0 if (ort == 'Forward') else 180
+                angle = 0 if (device_orientation == 'Forward') else 180
             elif xy % 10 == 3:
-                angle = 90 if (ort == 'Forward') else 270
+                angle = 90 if (device_orientation == 'Forward') else 270
             elif xy % 10 == 6:
-                angle = 180 if (ort == 'Forward') else 0
+                angle = 180 if (device_orientation == 'Forward') else 0
             elif xy % 10 == 9:
-                angle = 270 if (ort == 'Forward') else 90
+                angle = 270 if (device_orientation == 'Forward') else 90
             if r == 0:
                 dir = 'C'
             elif angle == 0:
@@ -321,8 +314,8 @@ def points(s, n, ort):
 
 if __name__ == '__main__':
     init({'id': '1','dut1_offset':0}, '1')
-    goto_rack('1','Forward')
+    goto_rack('1',)
     takecard()
-    goto_rack('2','Forward')
+    goto_rack('2',)
     releasecard()
 
