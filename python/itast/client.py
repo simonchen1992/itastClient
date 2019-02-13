@@ -1,308 +1,403 @@
+import MySQLdb
 from urllib import urlencode
 import requests
+#import itast.settings
+#import itast.utils
+import time  # trace 1s down time for robot arm
+#import win32api  # open and close client VCAS
+import threading # async way of testing
 import os
 import json
-import itast.settings
-import itast.utils
-import time
-import win32api
-import threading
 from colorama import init, Fore, Back, Style
 #init(autoreset=True)
 
-# General
+class dbClient(object):
+	def __init__(self):
+		try:
+			self.db = MySQLdb.connect(user='itastdirector', passwd='APtsd01$', host='192.168.48.60', db='itastdb')
+		except Exception as e:
+			self.errHandle(e)
 
-confPath = os.path.abspath(os.path.dirname(os.getcwd()))
-with open(confPath + '/conf.json') as json_file:
-    conf = json.load(json_file)
+	def __del__(self):
+		self.db.close()
 
-def raiseEx(msg):
-    raw_input(Fore.RED + str(msg) + Style.RESET_ALL)
-    exit(1)
+	# General
 
-def requestJson(query):
-    res = requests.get(itast.settings.ITAST_HOST + query)
-    return itast.utils.RawToJson(res.text)
+	def errHandle(self, msg):
+		raw_input(Fore.RED + str(msg) + Style.RESET_ALL)
+		self.db.rollback()
+		self.db.close()
+		exit(1)
 
-# Sessions
+	def dbSelect(self, table, db_id):
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "SELECT * FROM %s WHERE id = %s;" % (table, db_id)
+			cursor.execute(sql)
+			output = cursor.fetchoneDict()
+			cursor.close()
+			return output
+		except Exception as e:
+			self.errHandle(e)
 
-def getNewSession():
-    session = requestJson('/db/sessions/new')
-    return session[0]
+	# Sessions
 
-def getSession(id):
-    session = requestJson('/db/sessions/' + str(id))
-    return session[0]
+	def getSession(self, db_id):
+		return self.dbSelect('test_sessions', db_id)
 
-def updateSession(s):
-    if s['id']<1:
-        return s
-    updated = requestJson('/db/sessions/update/' + str(s['id']) + '?' + urlencode(s))
-    return updated[0]
+	def createSession(self):
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "INSERT INTO test_sessions () Values ();"
+			cursor.execute(sql)
+			lastInsertId = self.db.insert_id()
+			self.db.commit()
+			cursor.close()
+			return self.getSession(lastInsertId)
+		except Exception as e:
+			self.errHandle(e)
 
-def getSessions(orderfield='id', order='desc', limit=0, start=0):
-    sessions = requestJson('/db/sessions')
-    return sessions
+	def updateSession(self, s):
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "UPDATE test_sessions SET"
+			for key, value in s.items():
+				if key not in ['id', 'created', 'timestamp', ] and value not in [None, '']:
+					if key in ['dut1_offset', 'dut2_offset', 'dutref_offset', 'official_run']:
+						sql += " %s = %s," % (key,value)
+					else:
+						sql += " %s = '%s'," % (key, value)
+			sql = sql[:-1] + ' WHERE id = %s;' % s['id']
+			cursor.execute(sql)
+			self.db.commit()
+			cursor.close()
+			return self.getSession(s['id'])
+		except Exception as e:
+			self.errHandle(e)
 
-# Cases
+	# Logs
 
-def getNewCase(idsession, idcard, d, p, v='Pending'):
-    c = {'id_test_session': idsession, 'id_card': idcard, 'dut': d, 'pos': p, 'verdict': v}
-    case = requestJson('/db/cases/new' + '?' + urlencode(c))
-    return case[0]
+	def getLog(self, db_id):
+		return self.dbSelect('commands_log', db_id)
 
-def getCase(id):
-    case = requestJson('/db/cases/' + str(id))
-    return case[0]
+	def createLog(self, idsession, idcase, command, arg='', code='', vals=''):
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "INSERT INTO commands_log (id_test_session,id_test_case,command,args,res_code,res_vals) " \
+				  "Values (%s,%s,'%s','%s','%s','%s');" % (str(idsession), str(idcase), command, arg, code, vals)
+			cursor.execute(sql)
+			lastInsertId = self.db.insert_id()
+			self.db.commit()
+			cursor.close()
+			return self.getLog(lastInsertId)
+		except Exception as e:
+			self.errHandle(e)
 
-def getCases(orderfield='id', order='desc', limit=0, start=0):
-    cases = requestJson('/db/cases')
-    return cases
+	# Cards
 
-def updateCase(c):
-    if c['id']<1:
-        return c
-    updated = requestJson('/db/cases/update/' + str(c['id']) + '?' + urlencode(c))
-    return updated[0]
+	def getCard(self, db_id):
+		return self.dbSelect('visa_cards', db_id)
 
-# Tx
+	def updateCard(self, c):  # CAN ONLY UPDATE "defective" FIELD, OTHERS ARE FIXED!!!
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "UPDATE visa_cards SET defective = %s WHERE id = %s" % (c['defective'], c['id'])
+			cursor.execute(sql)
+			self.db.commit()
+			cursor.close()
+			return self.getCase(c['id'])
+		except Exception as e:
+			self.errHandle(e)
 
-def getNewTx(idsession, idcase, idcard, d, p, r, dur=0):
-    t = {'id_test_session': idsession, 'id_test_case': idcase ,'id_card': idcard, 'dut': d, 'pos': p, 'res': r, 'duration': dur}
-    tx = requestJson('/db/txs/new' + '?' + urlencode(t))
-    return tx[0]
+	# Cases
 
-def getTx(id):
-    tx = requestJson('/db/txs/' + str(id))
-    return tx[0]
+	def getCase(self, db_id):
+		return self.dbSelect('test_cases', db_id)
 
-def getTxs(orderfield='id', order='desc', limit=0, start=0):
-    txs = requestJson('/db/tx')
-    return txs
+	def createCase(self, idsession, idcard, dut, pos, v='Pending'):
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "INSERT INTO test_cases (id_test_session,id_card,dut,pos,verdict) " \
+				  "Values (%s,%s,'%s','%s','%s');" % (str(idsession), str(idcard), dut, pos, v)
+			cursor.execute(sql)
+			lastInsertId = self.db.insert_id()
+			self.db.commit()
+			cursor.close()
+			return self.getCase(lastInsertId)
+		except Exception as e:
+			self.errHandle(e)
 
-def updateTx(t):
-    if t['id']<1:
-        return t
-    updated = requestJson('/db/txs/update/' + str(t['id']) + '?' + urlencode(t))
-    return updated[0]
+	def updateCase(self, c):
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "UPDATE test_cases SET"
+			for key, value in c.items():
+				if key not in ['id', 'created', 'timestamp', ] and value not in [None, '']:
+					if key in ['id_test_session', 'id_card']:
+						sql += " %s = %s," % (key,value)
+					else:
+						sql += " %s = '%s'," % (key, value)
+			sql = sql[:-1] + ' WHERE id = %s;' % c['id']
+			cursor.execute(sql)
+			self.db.commit()
+			cursor.close()
+			return self.getCase(c['id'])
+		except Exception as e:
+			self.errHandle(e)
 
-# Cards
+	# Tx
 
-def getNewCard():
-    card = requestJson('/db/cards/new')
-    return card[0]
+	def getTx(self, db_id):
+		return self.dbSelect('test_txs', db_id)
 
-def getCard(id):
-    card = requestJson('/db/cards/' + str(id))
-    return card[0]
+	def createTx(self, idsession, idcase, idcard, dut, pos, r='0000', dur=0):
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "INSERT INTO test_txs (id_test_session,id_test_case,id_card,dut,pos,res,duration) " \
+				  "Values (%s,%s,%s,'%s','%s','%s','%s');" % (str(idsession), str(idcase), str(idcard), dut, pos, r, dur)
+			cursor.execute(sql)
+			lastInsertId = self.db.insert_id()
+			self.db.commit()
+			cursor.close()
+			return self.getTx(lastInsertId)
+		except Exception as e:
+			self.errHandle(e)
 
-def getCards(orderfield='id', order='desc', limit=0, start=0):
-    cards = requestJson('/db/cards')
-    return cards
+	def updateTx(self, t):
+		try:
+			cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
+			sql = "UPDATE test_txs SET"
+			for key, value in t.items():
+				if key not in ['id', 'created', 'timestamp', ] and value not in [None, '']:
+					if key in ['id_test_session', 'id_test_case' 'id_card']:
+						sql += " %s = %s," % (key,value)
+					else:
+						sql += " %s = '%s'," % (key, value)
+			sql = sql[:-1] + ' WHERE id = %s;' % t['id']
+			cursor.execute(sql)
+			self.db.commit()
+			cursor.close()
+			return self.getTx(t['id'])
+		except Exception as e:
+			self.errHandle(e)
 
-def updateCard(c):
-    if c['id']<1:
-        return c
-    updated = requestJson('/db/cards/update/' + str(c['id']) + '?' + urlencode(c))
-    return updated[0]
-
-# Log
-
-def getNewLog(idsession, idcase, c, a='', code='', vals=''):
-    c = {'id_test_session': idsession, 'id_test_case': idcase, 'command': c, 'args': a, 'res_code': code, 'res_vals': vals}
-    log = requestJson('/db/logs/new' + '?' + urlencode(c))
-    return log[0]
-
-def getLog(id):
-    log = requestJson('/db/logs/' + str(id))
-    return log[0]
-
-def getLogs(orderfield='id', order='desc', limit=0, start=0):
-    logs = requestJson('/db/logs')
-    return logs
-
-# SDK
-
-# watchdog modifier
+# decro function which will used in Class sdkClient
 def watchdog(f):
-  def exec_vcasCommand(dutID, sessionID, caseID, *args, **kwargs):
-      response = f(*args, **kwargs)
-      if response[0] != '00':  # prepare transaction procedure
-          start = conf["start"]  # start service address
-          stop = conf["stop"]  # stop service address
-          resetsupport = conf["resetsupport"]  # Device support reset function or not: 0 supported, 1 not supported
-          itast.client.getNewLog(sessionID, caseID, 'Execute refresh procedure', '', '', '')
-          if not itast.client.reset(dutID, stop, start, resetsupport):
-              raiseEx('reset failure')
-          response = f(*args, **kwargs)
-          if response[0] != '00':
-              raiseEx('Cannot receive proper response even after reset procedure.')
-      return response
-  return exec_vcasCommand
+	def exec_vcasCommand(self, dutID, sessionID, caseID, *args, **kwargs):
+		response = f(self, dutID, *args, **kwargs)
+		if response[0] != '00':  # prepare transaction procedure
+			start = self.conf["start"]  # start service address
+			stop = self.conf["stop"]  # stop service address
+			resetsupport = self.conf["resetsupport"]  # Device support reset function or not: 0 supported, 1 not supported
+			super(sdkClient, self).getNewLog(sessionID, caseID, 'Execute refresh procedure', '', '', '')
+			if not self.reset(dutID, stop, start, resetsupport):
+				self.errHandle('reset failure')
+			response = f(self, *args, **kwargs)
+			if response[0] != '00':
+				self.errHandle('Cannot receive proper response even after reset procedure.')
+		return response
+	return exec_vcasCommand
 
-@watchdog
-def sdkGetConfig(d):
-    return requestJson('/sdk/getconfig'+d)
+class sdkClient(dbClient):
+	def __init__(self):
+		# initial db object
+		super(sdkClient, self).__init__()
+		# get conf.json in prior dictionary
+		self.confPath = os.path.abspath(os.path.dirname(os.getcwd()))
+		with open(self.confPath + '/conf.json') as json_file:
+			self.conf = json.load(json_file)
 
-@watchdog
-def sdkSetConfigToDefault(d):
-    return requestJson('/sdk/setconfigtodefault' + d)
+	def __del__(self):
+		super(sdkClient, self).__del__()
 
-@watchdog
-def sdkSetConfig(tag, value, d):
-    return requestJson('/sdk/setconfig' + d + '?' + 'tag=' + str(tag) + '&' + 'value=' + str(value))
+	@classmethod
+	def errHandle(self, msg):
+		raw_input(Fore.RED + str(msg) + Style.RESET_ALL)
+		exit(1)
 
-
-def sdkPrepareTransaction(tx,d):
-    return requestJson('/sdk/preparetransaction' + d + '?' + urlencode(tx))
-
-
-def sdkStartTransaction(amount, tx, d):  # changed for asyn way
-    return requestJson('/sdk/starttransaction' + d + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
-
-@watchdog
-def sdkStartTransactionAsync(amount, tx, d, pos):
-    from itast.robot import goto_DUT_tx, goto_DUT, leave
-    max_waiting_rffield = conf['deviceWaitingTime']
-    err_response = ['01', '']  # simulate return code 01 and no return value
-    class MyThread(threading.Thread):
-        def __init__(self, func, args=()):
-            threading.Thread.__init__(self)
-            self.func = func
-            self.args = args
-        def run(self):
-            self.result = self.func(*self.args)
-        def get_result(self):
-            try:
-                return self.result
-            except Exception as e:
-                raiseEx(e)
-    def start_tx():
-        results = sdkStartTransaction(amount, tx, d)
-        return results
-    def stop_tx():
-        sdkStopCurrentTransaction(tx, d)
-
-    goto_DUT(pos, d)  # Goto test positions
-    if sdkPrepareTransaction(tx, d)[0] != '00':
-      return err_response
-    t1 = MyThread(start_tx, args='')
-    t2 = threading.Thread(target=stop_tx, args='')
-    t1.start()
-    t1.join(max_waiting_rffield)
-    goto_DUT_tx(pos[3], d)  # Card falls down
-    down_time1 = time.time()
-    t1.join(1)
-    down_time2 = time.time()
-    leave()
-    print 'Down Time in test position is: ' + str(down_time2 - down_time1) + ' seconds'
-    if t1.isAlive():
-        t1.join(13 - 1 - max_waiting_rffield)  # shall be improved: refer to timeout time
-        if t1.isAlive():
-            t2.start()
-            t1.join()
-            if t2.isAlive():
-                t2.join()
-    response = t1.get_result()
-    # Deal with EF05: Request reset
-    if response[1][5:9] == 'EF05':
-        if conf["resetsupport"] == "01":
-            raw_input('Please reset the device manually and reconnect the device and webservice!\n')
-        else:
-            itast.client.sdkResetDevice(d)
-            time.sleep(20)
-    # GetDebugLogs from last transaction
-    if itast.client.sdkGetDebugLog(tx, d)[0] != '00':  # Getdebuglog from last transaction
-        return err_response
-    return t1.get_result()
+	@classmethod
+	def requestJson(self, query):
+		res = requests.get(itast.settings.ITAST_HOST + query)
+		return itast.utils.RawToJson(res.text)
 
 
-def sdkStopCurrentTransaction(tx, d):
-    return requestJson('/sdk/stopcurrenttransaction' + d + '?' + urlencode(tx))
+	@watchdog
+	def sdkGetConfig(self, d):
+		return self.requestJson('/sdk/getconfig' + d)
 
-def sdkGetDebugLog(tx, d):
-    return requestJson('/sdk/getdebuglog' + d + '?' + urlencode(tx))
+	@watchdog
+	def sdkSetConfigToDefault(self, d):
+		return self.requestJson('/sdk/setconfigtodefault' + d)
 
-@watchdog
-def sdkClearLogs(tx, d):
-    return requestJson('/sdk/clearlogs' + d + '?' + urlencode(tx))
+	@watchdog
+	def sdkSetConfig(self, d, tag, value):
+		return self.requestJson('/sdk/setconfig' + d + '?' + 'tag=' + str(tag) + '&' + 'value=' + str(value))
 
-def sdkGetDeviceState(d):
-    return requestJson('/sdk/getdevicestate' + d)
+	def sdkPrepareTransaction(self, d, tx):
+		return self.requestJson('/sdk/preparetransaction' + d + '?' + urlencode(tx))
 
-def sdkResetDevice(d):
-    return requestJson('/sdk/resetdevice' + d)
+	def sdkStartTransaction(self, d, amount, tx):  # changed for asyn way
+		return self.requestJson('/sdk/starttransaction' + d + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
 
-# case verdict calculation
-def genVerdict(amount, result, posVerdict, changeamount, config):  # TODO: EF00
-    devicetype = config[1].split('\n')[0][5:]
-    if (result == '5931') or (result == '3030'):
-        posVerdict.append('PASS')
-    elif (result == 'EF03') or (result == 'EF04') or (result == 'EF05') or (result == 'EF00'):
-        posVerdict.append('CF')
-    elif (result == 'EF01') or (result == 'EF02') or (result == 'EF06'):
-        posVerdict.append('TF')
-    elif result == '5A31':
-        # TODO: use better way get online
-        # check if the device is online-capable device
-        bstr = bin(int(devicetype[1], 16))[2:]
-        l = len(bstr) % 4
-        if l > 0:
-            bstr = ('0' * (4 - l)) + bstr
-        if bstr[0] == '0':
-            amtzeroCheck = config[1].split('\n')[9][5:]
-            statusCheck = config[1].split('\n')[2][5:]
-            floorlimitAmt = config[1].split('\n')[6][5:]
-            # check if transaction amount has been changed on this card against device
-            if changeamount == 0:
-                changeamount = 1
-                if amtzeroCheck == '01':
-                    amount = 0.00
-                elif statusCheck == '00':
-                    amount = int(floorlimitAmt)/100 + 1
-                else:
-                    amount = 1.00
-                posVerdict = []
-            else:
-                posVerdict.append('NT')
-    else:
-        raiseEx('improper result: ' + str(result))
-    return [changeamount, amount, posVerdict]
+	@watchdog
+	def sdkStartTransactionAsync(self, d, amount, tx, pos):
+		from itast.robot import goto_DUT_tx, goto_DUT, leave
+		max_waiting_rffield = self.conf['deviceWaitingTime']
+		err_response = ['01', '']  # emulate return code 01 and no return value
 
+		# simple rewrite of class threading.Thread to get result from the end of thread.
+		class MyThread(threading.Thread):
+			def __init__(self, func, args=()):
+				threading.Thread.__init__(self)
+				self.func = func
+				self.args = args
+			def run(self):
+				self.result = self.func(*self.args)
+			def get_result(self):
+				try:
+					return self.result
+				except Exception as e:
+					raw_input(Fore.RED + str(e) + Style.RESET_ALL)
+					exit(1)
 
-def reset(d, stop, start, resetsupport):  # Input data: device number, startservice and stopservice address, reset support or not
-    for resetChance in range(3):
-        if resetsupport == '00':
-            resetTime = conf['resetTime']
-            resetRes = sdkResetDevice(d)[0]
-            time.sleep(resetTime)
-            if resetRes != '00':
-                pass
-            elif sdkGetDeviceState(d)[0] != '00':
-                pass
-            else:
-                return True
-        # common process
-        raw_input('Please reset the device manually and reconnect the device and webservice!\n')
-        if sdkGetDeviceState(d)[0] != '00':
-            win32api.ShellExecute(0, 'open', stop, '', '', 1)  # shall be run stop and start executable and then getdevicestate
-            time.sleep(4)
-            win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
-            time.sleep(15)
-            if sdkGetDeviceState(d)[0] == '00':
-                return True
-        else:
-            return True
-    return False
+		def start_tx():
+			results = self.sdkStartTransaction(d, amount, tx)
+			return results
 
-#dispenser
-def dispenserInitial(d1, d2, d3, d4):
-    initial = {'d1': d1, 'd2': d2, 'd3': d3, 'd4': d4}
-    return requestJson('/dispenser/initiate' + '?' + urlencode(initial))
+		def stop_tx():
+			self.sdkStopCurrentTransaction(d, tx)
 
-def dispenserMov(id, dis, dir):
-    return requestJson('/dispenser/rack' + id + dir + '?' + 'distance=' + dis)
+		goto_DUT(pos, d)  # Goto test positions
+		if self.sdkPrepareTransaction(d, tx)[0] != '00':
+			return err_response
+		t1 = MyThread(start_tx, args='')
+		t2 = threading.Thread(target=stop_tx, args='')
+		t1.start()  # Send StartTransaction command to DUT
+		t1.join(max_waiting_rffield)  # max_waiting_rffield indicate time between "send StartTransaction()" to "device open its RF field"
+		goto_DUT_tx(pos[3], d)  # Card falls down
+		downTime1 = time.time()
+		t1.join(1)
+		downTime2 = time.time()
+		leave()
+		tx['robotdown'] = time.strftime("%b %d %Y %H:%M:%S", time.localtime(downTime1))
+		tx['robotup'] = time.strftime("%b %d %Y %H:%M:%S", time.localtime(downTime2))
+		tx['duration'] = downTime2 - downTime1
+		super(sdkClient, self).updateTx(tx)
+		if t1.isAlive():
+			t1.join(13 - 1 - max_waiting_rffield)  # shall be improved: refer to timeout time
+			if t1.isAlive():
+				t2.start()
+				t1.join()
+				if t2.isAlive():
+					t2.join()
+		response = t1.get_result()
+		# Deal with EF05: Request reset
+		if response[1][5:9] == 'EF05':
+			if self.conf["resetsupport"] == "01":
+				raw_input('Please reset the device manually and reconnect the device and webservice!\n')
+			else:
+				self.sdkResetDevice(d)
+				time.sleep(20)
+		# GetDebugLogs from last transaction
+		if self.sdkGetDebugLog(d, tx)[0] != '00':  # Getdebuglog from last transaction
+			return err_response
+		return t1.get_result()
+
+	def sdkStopCurrentTransaction(self, d, tx):
+		return self.requestJson('/sdk/stopcurrenttransaction' + d + '?' + urlencode(tx))
+
+	def sdkGetDebugLog(self, d, tx):
+		return self.requestJson('/sdk/getdebuglog' + d + '?' + urlencode(tx))
+
+	@watchdog
+	def sdkClearLogs(self, d, tx):
+		return self.requestJson('/sdk/clearlogs' + d + '?' + urlencode(tx))
+
+	def sdkGetDeviceState(self, d):
+		return self.requestJson('/sdk/getdevicestate' + d)
+
+	def sdkResetDevice(self, d):
+		return self.requestJson('/sdk/resetdevice' + d)
+
+	# case verdict calculation
+	def genVerdict(self, retcode, posVerdict, txOnlineCounter, deviceConf, dutID, sessionID, caseID):  # TODO: EF00
+		ttq = deviceConf[dutID][1].split('\n')[0][5:]  # from command GetConfig()
+		amount = 0.01
+		if (retcode == '5931') or (retcode == '3030'):
+			posVerdict.append('PASS')
+		elif (retcode == 'EF03') or (retcode == 'EF04') or (retcode == 'EF05'):
+			posVerdict.append('CF')
+		elif (retcode == 'EF01') or (retcode == 'EF02') or (retcode == 'EF06') or (retcode == 'EF00'):
+			posVerdict.append('TF')
+		elif retcode == '5A31':
+			# check if the device is online-capable device, if byte14 set to 1, device is offline-only device
+			byte14 = bin(int(ttq[1], 16))[2:]  # [2:] is to remove '0b'
+			if len(byte14) % 4 > 0:
+				byte14 = ('0' * (4 - len(byte14) % 4)) + byte14
+			if byte14[0] == '0':
+				posVerdict = []  # reset posVerdict if the device is not offline-only
+				# 1st solution to get online: change byte2 bit8 of TTQ
+				if txOnlineCounter == 0:
+					ttqTObit = bin(int(ttq, 16))[2:]  # [2:] is to remove '0b'
+					ttqTObit = ttqTObit[:8] + '1' + ttqTObit[9:]
+					ttq = hex(int(ttqTObit, 2))[2:]
+					self.sdkSetConfig(dutID, tag=1, value=ttq)
+				# 2nd solution to get online: enable status check and use amount 1
+				if txOnlineCounter == 1:
+					self.sdkSetConfigToDefault(dutID, sessionID, caseID)
+					self.sdkSetConfig(dutID, tag=3, value=1)
+					amount = 1.00
+				# 3rd solution to get online: disable cvm limit check and use amount 81
+				if txOnlineCounter == 2:
+					self.sdkSetConfigToDefault(dutID, sessionID, caseID)
+					# TODO: check
+					self.sdkSetConfig(dutID, tag=11, value=0)
+					amount = 81.00
+				else:
+					self.errHandle('Cannot Get online transaction by all means, please check manually.')
+			else:
+				posVerdict.append('PASS')  # If device is offline-only, 5A31 can be accepted with PASS verdict
+		else:
+			self.errHandle('improper result: ' + str(retcode))
+		txOnlineCounter += 1
+		return [txOnlineCounter, amount, posVerdict]
+
+	def reset(self, d, stop, start, resetsupport):  # Input data: device number, startservice and stopservice address, reset support or not
+		for resetChance in range(3):
+			if resetsupport == '00':
+				resetTime = self.conf['resetTime']
+				resetRes = self.sdkResetDevice(d)[0]
+				time.sleep(resetTime)
+				if resetRes != '00':
+					pass
+				elif self.sdkGetDeviceState(d)[0] != '00':
+					pass
+				else:
+					return True
+			# common process
+			raw_input('Please reset the device manually and reconnect the device and webservice!\n')
+			if self.sdkGetDeviceState(d)[0] != '00':
+				win32api.ShellExecute(0, 'open', stop, '', '', 1)  # shall be run stop and start executable and then getdevicestate
+				time.sleep(4)
+				win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
+				time.sleep(15)
+				if self.sdkGetDeviceState(d)[0] == '00':
+					return True
+			else:
+				return True
+		return False
+
+class dispenserClient(object):
+	# dispenser control
+	def dispenserInitial(self, d1, d2, d3, d4):
+		initial = {'d1': d1, 'd2': d2, 'd3': d3, 'd4': d4}
+		return sdkClient.requestJson('/dispenser/initiate' + '?' + urlencode(initial))
+	def dispenserMov(self, id, dis, dir):
+		return sdkClient.requestJson('/dispenser/rack' + id + dir + '?' + 'distance=' + dis)
+
 
 if __name__ == '__main__':
-    sdkSetConfig('1', '2', '', {}, 3, 1, '1')
-    #sdkPrepareTransaction('1', '2', '', {}, {}, '1')
+	a = dbClient()
+	card = a.getCard(1)
+	card['defective'] = 0
+	a.updateCard(card)

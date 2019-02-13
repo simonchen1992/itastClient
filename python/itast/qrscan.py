@@ -21,11 +21,12 @@ def startscan(port):
 
 def multiscan(port, times):
     i = 0
-    qr = startscan(port)
-    while qr == 'QR code not found!' and i <= times:
-        qr = startscan(port)
+    result = startscan(port)
+    while result == 'QR code not found!' and i <= times:
+        result = startscan(port)
         i += 1
-    if qr == 'QR code not found!':
-        raise Exception('Scan failure')
+    if result == 'QR code not found!':
+        raw_input('Scan failure')
+        exit(1)
     else:
-        return qr
+        return result

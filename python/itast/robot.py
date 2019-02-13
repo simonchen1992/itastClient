@@ -2,7 +2,6 @@ import win32com.client
 import time
 import json
 import numpy as np
-import itast.client as client
 from os import system
 from colorama import init, Fore, Back, Style
 #init(autoreset=True)
@@ -26,45 +25,47 @@ extspd = Marvin.AddVariable("@EXTSPEED")
 
 #  robot initialization
 def init(session, deviceID):
-    global terminal, dispenser, appconfig, test_height, test_position, device_orientation, test_speed, offset
-    with open("appconfig.json") as json_file:
-        appconfig = json.load(json_file)
-    #  fetch robot coordinate from appconfigiguration file
-    terminal = appconfig["coordinate"]["dut"]
-    dispenser = appconfig["coordinate"]["dispenser"]
-    test_height = appconfig["custom"]["test_height"]
-    test_position = appconfig["custom"]["test_position"]
-    device_orientation = appconfig["custom"]["orientation"]
+    global terminal, dispenser, robotConf, test_height, test_position, device_orientation, test_speed, offset
+    with open("robot_conf.json") as json_file:
+        robotConf = json.load(json_file)
+    #  fetch robot coordinate from robotConfiguration file
+    terminal = robotConf["coordinate"]["dut"]
+    dispenser = robotConf["coordinate"]["dispenser"]
+    test_height = robotConf["custom"]["test_height"]
+    test_position = robotConf["custom"]["test_position"]
+    device_orientation = robotConf["custom"]["orientation"]
     sessionID = session['id']
     offset = {}
     for d in deviceID:
         offset[d] = session["dut" + d + "_offset"]
     test_speed = extspd.Value
     setting = raw_input("--------------Please enter the robot setting number if you want to modify--------------\n"
-                    "1. Current calibrated 0C position for all listed device is: \n" + Fore.RED +
-                    str([('DUT' + dutID, terminal[dutID]) for dutID in deviceID])[1:-1] + Style.RESET_ALL + "\n"
-                    "2. Current testing heights are: " + Fore.RED + str(test_height) + Style.RESET_ALL +
+                    "1. Current calibrated 0C position for all listed devices are: \n" + Fore.RED +
+                    str([('DUT' + dutID, terminal[dutID]) for dutID in sorted(deviceID)])[1:-1] + Style.RESET_ALL + "\n"
+                    "2. Current calibrated dispensers' position are:\n" + Fore.RED +
+                    str([('Dispenser' + i, dispenser[i]) for i in sorted(dispenser.keys())])[1:-1] + Style.RESET_ALL + "\n"
+                    "3. Current testing heights are: " + Fore.RED + str(test_height) + Style.RESET_ALL +
                     "; Current testing positions are: " + Fore.RED + str(test_position) + Style.RESET_ALL + "\n"
-                    "3. Current device orientation is: " + Fore.RED + device_orientation + Style.RESET_ALL + "\n"
-                    "4. Current robot speed is: " + Fore.RED + str(test_speed) + Style.RESET_ALL + "\n"
-                    "5. Initiate all settings into default.\n" +
-                    Style.BRIGHT + "6. Start testing!!" + Style.RESET_ALL + "\n")
+                    "4. Current device orientation is: " + Fore.RED + device_orientation + Style.RESET_ALL + "\n"
+                    "5. Current robot speed is: " + Fore.RED + str(test_speed) + Style.RESET_ALL + "\n"
+                    "6. Initiate all settings into default.\n" +
+                    Style.BRIGHT + "7. Start testing!!" + Style.RESET_ALL + "\n")
     while True:
         if setting == '1':
-            return calibrate_setting(session, deviceID)
+            return deviceCalibration(session, deviceID)
         elif setting == '2':
-            return custom_testposition(session, deviceID)
+            return dispenerCalibration(session, deviceID)
         elif setting == '3':
-            return orientation_setting(session, deviceID)
+            return customTestPosition(session, deviceID)
         elif setting == '4':
-            return speed_setting(session, deviceID)
+            return orientSetting(session, deviceID)
         elif setting == '5':
-            return default_setting(session, deviceID)
+            return speedSetting(session, deviceID)
         elif setting == '6':
+            return defaultSetting(session, deviceID)
+        elif setting == '7':
             raw_input('Please turn the robot panel to AUTO mode.\n')
             robot_takearm()
-            client.getNewLog(sessionID, '', 'DUT1 Position 0C calibration', '', '', '')
-            client.getNewLog(sessionID, '', 'reference device Position 0C calibration', '', '', '')
         else:
             setting = raw_input()
             continue
@@ -84,7 +85,7 @@ def ex_handle():
         exit(1)
 
 #  setting - calibrate device 0C position
-def calibrate_setting(s, d):
+def deviceCalibration(s, d):
     dutID = raw_input('Please input Device ID that you want to carlibrate. e.g. 1, 2, ref..\n')
     while dutID not in d:
         dutID = raw_input('Please input Device ID that you want to carlibrate. e.g. 1, 2, ref..\n')
@@ -106,13 +107,28 @@ def calibrate_setting(s, d):
     # x = float(input('please ipuut X coordinate: '))
     # y = float(input('please ipuut Y coordinate: '))
     # z = float(input('please ipuut Z coordinate: '))
-    appconfig["coordinate"]["dut"][dutID][0:3] = [x, y, z]
-    with open("appconfig.json", 'w') as json_file:
-        json_file.write(json.dumps(appconfig))
+    robotConf["coordinate"]["dut"][dutID][0:3] = [x, y, z]
+    with open("robotConf.json", 'w') as json_file:
+        json_file.write(json.dumps(robotConf))
     return init(s, d)
 
+#  setting - calibrate dispenser positions
+def dispenerCalibration(s, d):
+    dispenserID = raw_input('Please input Dispenser ID that you want to carlibrate. e.g. 1, 2, 3, 4\n')
+    while dispenserID not in dispenser.keys():
+        dispenserID = raw_input('Please input Dispenser ID that you want to carlibrate. e.g. 1, 2, 3, 4\n')
+    raw_input('Please calibrate XY coordinate of Dispenser%s.\n' % dispenserID)
+    ta = curpos.Value
+    x = ta[0]
+    y = ta[1]
+    robotConf["coordinate"]["dispenser"][dispenserID][0:2] = [x, y]
+    with open("robotConf.json", 'w') as json_file:
+        json_file.write(json.dumps(robotConf))
+    return init(s, d)
+
+
 # setting - custom testing height vs positions
-def custom_testposition(s, d):
+def customTestPosition(s, d):
     zflag = False
     xyflag = False
     while not zflag:
@@ -131,23 +147,23 @@ def custom_testposition(s, d):
             if i not in [0, 10, 13, 16, 19]:
                 xyflag = False
                 break
-    appconfig["custom"]["test_height"] = Z
-    appconfig["custom"]["test_position"] = XY
-    with open("appconfig.json", 'w') as json_file:
-        json_file.write(json.dumps(appconfig))
+    robotConf["custom"]["test_height"] = Z
+    robotConf["custom"]["test_position"] = XY
+    with open("robotConf.json", 'w') as json_file:
+        json_file.write(json.dumps(robotConf))
     return init(s, d)
 
 #  setting - device orientation
-def orientation_setting(s, d):
+def orientSetting(s, d):
     ort = "Forward" if raw_input("Does the device face to the operator?\n1. YES, it's face to the operator.\n"
                              "2. NO, it's face to the robot.\n") != '2' else "Backward"
-    appconfig["custom"]["orientation"] = ort
-    with open("appconfig.json", 'w') as json_file:
-        json_file.write(json.dumps(appconfig))
+    robotConf["custom"]["orientation"] = ort
+    with open("robotConf.json", 'w') as json_file:
+        json_file.write(json.dumps(robotConf))
     return init(s, d)
 
 #  setting - robot external speed
-def speed_setting(s, d):
+def speedSetting(s, d):
     # set external speed
     speed = 0
     try:
@@ -160,14 +176,14 @@ def speed_setting(s, d):
     return init(s, d)
 
 #  setting - restore default settings
-def default_setting(s, d):
-    appconfig["custom"]["test_height"] = [0, 2, 3, 4]
-    appconfig["custom"]["test_position"] = [0, 10, 13, 16, 19]
-    appconfig["interval"] = 1.2
+def defaultSetting(s, d):
+    robotConf["custom"]["test_height"] = [0, 2, 3, 4]
+    robotConf["custom"]["test_position"] = [0, 10, 13, 16, 19]
+    robotConf["interval"] = 1.2
     Marvin.Execute('ExtSpeed', [70, 100, 100])
-    appconfig["custom"]["orientation"] = 'Forward'
-    with open("appconfig.json", 'w') as json_file:
-        json_file.write(json.dumps(appconfig))
+    robotConf["custom"]["orientation"] = 'Forward'
+    with open("robotConf.json", 'w') as json_file:
+        json_file.write(json.dumps(robotConf))
     return init(s, d)
 
 #  Robot - take arm authority
@@ -274,8 +290,10 @@ def leave():
         ex_handle()
 
 #  Generate testing points
-def points(s, n):
+def points():
     global device_orientation
+    s = 1
+    n = 40
     i = 1
     L = []
     for z in test_height:
@@ -303,7 +321,7 @@ def points(s, n):
             elif angle == 270:
                 dir = 'S'
             while s < n and s == i:
-                L.append([dir, r, angle, z, str(z)+str(xy).zfill(2)])
+                L.append([dir, r, angle, z])
                 s += 1
                 i += 1
                 break
@@ -312,10 +330,56 @@ def points(s, n):
                 continue
     return L
 
-if __name__ == '__main__':
-    init({'id': '1','dut1_offset':0}, '1')
-    goto_rack('1',)
+# generate points needed for extra testing when there's FAIL in 3
+def extraPoints():
+    global device_orientation
+    device_orientation = 'Forward'
+    s = 1
+    n = 40
+    i = 1
+    L = []
+    for z in [2]:
+        if z == 4:
+            L.append(['C', 0, 0, 4, '400'])
+            break
+        for xy in [10,13,16,19]:
+            r = 15 if (xy // 10 == 1) else 0
+            if xy % 10 == 0:
+                angle = 0 if (device_orientation == 'Forward') else 180
+            elif xy % 10 == 3:
+                angle = 90 if (device_orientation == 'Forward') else 270
+            elif xy % 10 == 6:
+                angle = 180 if (device_orientation == 'Forward') else 0
+            elif xy % 10 == 9:
+                angle = 270 if (device_orientation == 'Forward') else 90
+            if r == 0:
+                dir = 'C'
+            elif angle == 0:
+                dir = 'E'
+            elif angle == 90:
+                dir = 'N'
+            elif angle == 180:
+                dir = 'W'
+            elif angle == 270:
+                dir = 'S'
+            while s < n and s == i:
+                L.append([dir, r, angle, z])
+                s += 1
+                i += 1
+                break
+            if s != i:
+                i += 1
+                continue
+    return L
+
+def testUnaddreesPoints():
+    goto_rack(1)
     takecard()
-    goto_rack('2',)
+    itast.client.requestJson('/robot/testrunDUT1'+ '?' + 'id_test_session=' + str(sessionID))
+    goto_rack(2)
     releasecard()
+
+if __name__ == '__main__':
+    for p in extraPoints():
+        print p
 
