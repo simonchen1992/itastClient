@@ -1,18 +1,24 @@
 {
-    "start": "C:\\Users\\user\\Desktop\\DATECS\\SDK\\VisaService.exe",
-    "stop": "C:\\Users\\user\\Desktop\\DATECS\\SDK\\VisaService.exe",
-    "resetsupport": "01",
-    "deviceID": [
+    "start": ["C:\\Users\\user\\Desktop\\PAX_PAYWAVE_TA[20190307]_S920\\Host\\","VcasStartHostApp.exe"],
+    "stop": ["C:\\Users\\user\\Desktop\\PAX_PAYWAVE_TA[20190307]_S920\\Host\\","VcasStopHostApp.exe"],
+    "asyncsupport": "00",
+    "DEVICELIST": [
         "1"
     ],
+    "RACKLIST":{
+        "rackin":["1","2"],
+        "rackout":["3","3"]
+    },
     "cardHeight": 2.8,
     "deviceWaitingTime": 3,
-    "resetTime": 15,
-
+    "resetTime": 60,
+	
     "portnumber": {
-        "qrscan1": 8,
-        "qrscan2": 3,
-        "dispensercontroller": 2
+        "qrscan": {
+            "1": 19,
+            "2": 9
+        },
+        "dispensercontroller": 7
     }
 }
 

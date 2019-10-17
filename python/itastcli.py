@@ -18,10 +18,10 @@ dispenser = dispenserClient()
 with open('conf.json') as json_file:
 	conf = json.load(json_file)
 DEVICELIST = conf["DEVICELIST"]  # list all dutID
-QRPORT = conf["portnumber"]["qrscan1"]  # port number of qr scanner (only care about 1)
+QRPORT = conf["portnumber"]["qrscan"]  # port number of qr scanner
 cardHeight = conf['cardHeight']
-RACK_IN = ['1']  # RFU
-RACK_OUT = ['2']  # RFU
+RACK_IN = conf['RACKLIST']['rackin']
+RACK_OUT = conf['RACKLIST']['rackout']
 
 def errHandler(msg):
 	raw_input(Fore.RED + str(msg) + Style.RESET_ALL)
@@ -44,16 +44,18 @@ def promptFillSessionData(s):
 	s['owner'] = prompt("Testing Engineer: ")
 	s['dut1_name'] = prompt("DUT 1 Name (model): ")
 	s['dut1_id'] = prompt("DUT 1 ID (or S/N number): ")
-	s['dut1_description'] = "Testing Device 1"
 	s['dut2_name'] = prompt("DUT 2 Name (model): ")
 	s['dut2_id'] = prompt("DUT 2 ID (or S/N number): ")
-	s['dut2_description'] = "Testing Device 2"
 	s['dutref_name'] = prompt("DUT ref Name (model): ")
 	s['dutref_id'] = prompt('DUT ref ID (or part number): ')
 	s['dut1_offset'] = prompt("DUT 1 offset(mm) is: ")
+	s['dut1_offset'] = 0 if s['dut1_offset'].strip() == '' else s['dut1_offset']
 	s['dut2_offset'] = prompt("DUT 2 offset(mm) is: ")
+	s['dut2_offset'] = 0 if s['dut2_offset'].strip() == '' else s['dut2_offset']
+	if s['dut1_offset'] >= 5 or s['dut2_offset'] >= 5:
+		errHandler('The offset shall be smaller than 5mm according to EMV Requirements.')
 	s['notes'] = prompt("Any comment or notes shall be here: ")
-	s['visa_vtf'] = prompt("Visa VTF: ")
+	s['visa_vtf'] = prompt("Visa VTF(for TA only): ")
 
 # explain test positions from VISA template
 def transTestPosition(st):
@@ -86,8 +88,8 @@ def dispenserInitiate(s):
 
 # Initialize device configuration
 def sdkInitiate(dutID, sessionID):
-	vcas.sdkSetConfigToDefault(dutID, sessionID, '')  # prepare transaction procedure
-	return vcas.sdkGetConfig(dutID, sessionID, '')
+	vcas.sdkSetConfigToDefault(dutID, sessionID, '0')  # prepare transaction procedure
+	return vcas.sdkGetConfig(dutID, sessionID, '0')
 
 
 # Test run of robot to find unaddressable positions (only care about dut1)
@@ -119,7 +121,7 @@ def main_loop():
 	robot.init(session, DEVICELIST)
 	db.createLog(sessionID, '0', 'Position 0C calibration performed', '', '', '')
 	# Initialize dispenser
-	cardNumInrack = dispenserInitiate()
+	cardNumInrack = dispenserInitiate(newSession)
 	#  Initialize VCAS configuration
 	config = {}
 	nonReachPos = {}
@@ -140,12 +142,16 @@ def main_loop():
 			defectiveflag = False
 			#  Pick up and recognize card by qr scanner
 			robot.goto_rack(rackIn)
-			qr1 = qrscan.multiscan(QRPORT, 20)
+			qr1 = qrscan.multiscan(QRPORT[rackIn], 20)
+			if qr1 == 'QR code not found!':
+				print('Scan failure')
+				break
 			robot.takecard()
-			qr2 = qrscan.startscan(QRPORT)
+			qr2 = qrscan.startscan(QRPORT[rackIn])
 			if qr1 == qr2:
 				db.createLog(sessionID, '0', 'Failure in card pickup')  # record log in database
-				errHandler('Failure in card pickup')
+				print ('Failure in card pickup')
+				break  # goto next rackIN
 			db.createLog(sessionID, '0', 'Card check and identification')  # record log in database
 			dispenser.dispenserMov(rackIn, cardHeight, 'up')
 			#  get the card information from database
@@ -158,6 +164,7 @@ def main_loop():
 			"""
 			# Traversal for all devices to be test, configured in json file
 			for dutID in DEVICELIST:
+				vcas.sdkClearLogs(dutID, sessionID, caseID='')
 				if defectiveflag:
 					break
 				if offlineflag:
@@ -175,7 +182,8 @@ def main_loop():
 					break
 				#  Get non tested position for each dut
 				nonTestPos = transTestPosition(card['positions'])
-				nonTestPos.extend(nonReachPos[dutID])  # the return value of "expend" is None, can only be used in this way
+				if nonReachPos[dutID] is not None:  # or it will raise "None type is not iterable"
+					nonTestPos.extend(nonReachPos[dutID])  # the return value of "expend" is None, can only be used in this way
 				"""
 				  Collect all test positions which is customer by engineer,
 				  In this loop will execute test on all required test height-positions for one device
@@ -217,11 +225,11 @@ def main_loop():
 						  This is common process for all DUT.
 						"""
 						# execute testing on test height-positions
-						print "Testing " + posID + " of card " + card['id'] + ' on DUT' + dutID + str(attempt + 1)
+						print "Testing " + posID + " of card " + str(card['id']) + ' on DUT' + dutID + str(attempt + 1)
 						tx = db.createTx(sessionID, caseID, cardID, dutID, posID, '0000')
 						txResult = vcas.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, pos)[1][5:9]
 						print txResult
-						txUpdate = vcas.genVerdict(txResult, posVerdict, txOnlineCounter, config, dutID, sessionID, caseID)
+						txUpdate = vcas.genVerdict(amount, txResult, posVerdict, txOnlineCounter, config, dutID, sessionID, caseID)
 						txOnlineCounter = txUpdate[0]
 						amount = txUpdate[1]
 						posVerdict = txUpdate[2]
@@ -264,7 +272,7 @@ def main_loop():
 						  This process is only for testing device: DUT1, DUT2, etc...
 						"""
 						# official testing with DUT 1 and 2
-						if posVerdict.count('PASS') >= 5:
+						if posVerdict.count('PASS') >= 3:
 							if offlineflag:
 								case['comments'] = 'Transaction forced with Online Approval. With a standard amount (i.e. 0.01) ' \
 												'transaction is attempt to be offline but the outcome is declined offline ' \
@@ -297,9 +305,9 @@ def main_loop():
 						while attempt < 5:
 							print "Testing " + posID + " of card " + str(card['id']) + ' on DUT' + dutID + str(attempt + 1)
 							tx = db.createTx(sessionID, caseID, cardID, dutID, posID, '0000')
-							txResult = vcas.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, dutID, pos)[1][5:9]
+							txResult = vcas.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, pos)[1][5:9]
 							print txResult
-							txUpdate = vcas.genVerdict(txResult, posVerdict, txOnlineCounter, config, dutID, sessionID, caseID)
+							txUpdate = vcas.genVerdict(amount, txResult, posVerdict, txOnlineCounter, config, dutID, sessionID, caseID)
 							txOnlineCounter = txUpdate[0]
 							amount = txUpdate[1]
 							posVerdict = txUpdate[2]

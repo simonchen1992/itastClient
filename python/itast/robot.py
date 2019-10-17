@@ -6,6 +6,10 @@ from os import system
 from colorama import init, Fore, Back, Style
 #init(autoreset=True)
 
+
+# avoid last error not handled
+if system('tasklist|find /i "Cao.exe"') == 0:
+    system('taskkill /IM Cao.exe /F')
 #  establish robot arm connection
 eng = win32com.client.Dispatch("CAO.CaoEngine")
 ctrl = eng.Workspaces(0).AddController("", "CaoProv.DENSO.RC8", "", "Server=192.168.96.1")
@@ -26,7 +30,7 @@ extspd = Marvin.AddVariable("@EXTSPEED")
 #  robot initialization
 def init(session, deviceID):
     global terminal, dispenser, robotConf, test_height, test_position, device_orientation, test_speed, offset
-    with open("robot_conf.json") as json_file:
+    with open("itast/robot_conf.json") as json_file:
         robotConf = json.load(json_file)
     #  fetch robot coordinate from robotConfiguration file
     terminal = robotConf["coordinate"]["dut"]
@@ -47,9 +51,8 @@ def init(session, deviceID):
                     "3. Current testing heights are: " + Fore.RED + str(test_height) + Style.RESET_ALL +
                     "; Current testing positions are: " + Fore.RED + str(test_position) + Style.RESET_ALL + "\n"
                     "4. Current device orientation is: " + Fore.RED + device_orientation + Style.RESET_ALL + "\n"
-                    "5. Current robot speed is: " + Fore.RED + str(test_speed) + Style.RESET_ALL + "\n"
-                    "6. Initiate all settings into default.\n" +
-                    Style.BRIGHT + "7. Start testing!!" + Style.RESET_ALL + "\n")
+                    "5. Current robot speed is: " + Fore.RED + str(test_speed) + Style.RESET_ALL + "\n" +
+                    Style.BRIGHT + "6. Start testing!!" + Style.RESET_ALL + "\n")
     while True:
         if setting == '1':
             return deviceCalibration(session, deviceID)
@@ -62,10 +65,10 @@ def init(session, deviceID):
         elif setting == '5':
             return speedSetting(session, deviceID)
         elif setting == '6':
-            return defaultSetting(session, deviceID)
-        elif setting == '7':
             raw_input('Please turn the robot panel to AUTO mode.\n')
+            # robot take arm
             robot_takearm()
+            return
         else:
             setting = raw_input()
             continue
@@ -94,7 +97,7 @@ def deviceCalibration(s, d):
         raw_input('Please turn the robot panel to AUTO mode.\n')
         robot_takearm()
         sucflag.Value = 0
-        goto_rack(rackIn, device_orientation)
+        goto_rack(rackIn)
         takecard()
         robot_releasearm()
     raw_input('Please calibrate the parallel between device and card, then calibrate the Z coordinate of DUT1.\n')
@@ -108,7 +111,7 @@ def deviceCalibration(s, d):
     # y = float(input('please ipuut Y coordinate: '))
     # z = float(input('please ipuut Z coordinate: '))
     robotConf["coordinate"]["dut"][dutID][0:3] = [x, y, z]
-    with open("robotConf.json", 'w') as json_file:
+    with open("itast/robot_conf.json", 'w') as json_file:
         json_file.write(json.dumps(robotConf))
     return init(s, d)
 
@@ -122,7 +125,7 @@ def dispenerCalibration(s, d):
     x = ta[0]
     y = ta[1]
     robotConf["coordinate"]["dispenser"][dispenserID][0:2] = [x, y]
-    with open("robotConf.json", 'w') as json_file:
+    with open("itast/robot_conf.json", 'w') as json_file:
         json_file.write(json.dumps(robotConf))
     return init(s, d)
 
@@ -132,7 +135,7 @@ def customTestPosition(s, d):
     zflag = False
     xyflag = False
     while not zflag:
-        Z = raw_input('please enter the testing height: (e.g. 0,2,3,4)\n').split(',')
+        Z = raw_input('please enter the testing height: (e.g. 0,1,2,3,4)\n').split(',')
         Z = list(map(int, Z)) if (Z != ['']) else [0, 1, 2, 3, 4]
         zflag = True
         for i in Z:
@@ -149,7 +152,7 @@ def customTestPosition(s, d):
                 break
     robotConf["custom"]["test_height"] = Z
     robotConf["custom"]["test_position"] = XY
-    with open("robotConf.json", 'w') as json_file:
+    with open("itast/robot_conf.json", 'w') as json_file:
         json_file.write(json.dumps(robotConf))
     return init(s, d)
 
@@ -158,7 +161,7 @@ def orientSetting(s, d):
     ort = "Forward" if raw_input("Does the device face to the operator?\n1. YES, it's face to the operator.\n"
                              "2. NO, it's face to the robot.\n") != '2' else "Backward"
     robotConf["custom"]["orientation"] = ort
-    with open("robotConf.json", 'w') as json_file:
+    with open("itast/robot_conf.json", 'w') as json_file:
         json_file.write(json.dumps(robotConf))
     return init(s, d)
 
@@ -173,17 +176,6 @@ def speedSetting(s, d):
         raw_input(e)
         exit(1)
     Marvin.Execute('ExtSpeed', [speed, 100, 100])
-    return init(s, d)
-
-#  setting - restore default settings
-def defaultSetting(s, d):
-    robotConf["custom"]["test_height"] = [0, 2, 3, 4]
-    robotConf["custom"]["test_position"] = [0, 10, 13, 16, 19]
-    robotConf["interval"] = 1.2
-    Marvin.Execute('ExtSpeed', [70, 100, 100])
-    robotConf["custom"]["orientation"] = 'Forward'
-    with open("robotConf.json", 'w') as json_file:
-        json_file.write(json.dumps(robotConf))
     return init(s, d)
 
 #  Robot - take arm authority
@@ -263,10 +255,11 @@ def goto_DUT(pos, dutID):
     angle = pos[2]
     delta_y = r * np.cos(np.radians(angle - 90)) * (-1)
     delta_x = r * np.sin(np.radians(angle - 90))
-    try:
-        Marvin.Move(2, [[terminal[dutID][0] + delta_x, terminal[dutID][1] + delta_y, terminal[dutID][2] + 150, terminal[dutID][3], terminal[dutID][4], terminal[dutID][5]], 'p', '@E'], 'SPEED=35')
-    except:
-        ex_handle()
+    #try:
+    Marvin.Move(2, [[terminal[dutID][0] + delta_x, terminal[dutID][1] + delta_y, terminal[dutID][2] + 150, terminal[dutID][3], terminal[dutID][4], terminal[dutID][5]], 'p', '@E'], 'SPEED=35')
+    # except Exception as e:
+    #     print e
+    #     ex_handle()
 
 #  Robot - Moves down!
 def goto_DUT_tx(h, dutID):
@@ -278,7 +271,8 @@ def goto_DUT_tx(h, dutID):
             Marvin.Move(2, [[ta[0], ta[1], terminal[dutID][2] + h, ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
         else:
             Marvin.Move(2, [[ta[0], ta[1], terminal[dutID][2] + h - offset[dutID], ta[3], ta[4], ta[5]], 'p', '@E'], 'SPEED=80')
-    except:
+    except Exception as e:
+        print e
         ex_handle()
 
 #  Robot - Leave test position

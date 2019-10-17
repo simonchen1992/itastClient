@@ -25,8 +25,8 @@ def multiscan(port, times):
     while result == 'QR code not found!' and i <= times:
         result = startscan(port)
         i += 1
-    if result == 'QR code not found!':
-        raw_input('Scan failure')
-        exit(1)
+    #if result == 'QR code not found!':
+        #print('Scan failure')
+        #exit(1)
     else:
         return result

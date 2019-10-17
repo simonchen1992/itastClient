@@ -1,20 +1,29 @@
 import MySQLdb
 from urllib import urlencode
 import requests
-#import itast.settings
-#import itast.utils
+import itast.settings
+import itast.utils
 import time  # trace 1s down time for robot arm
-#import win32api  # open and close client VCAS
+import win32api  # open and close client VCAS
 import threading # async way of testing
 import os
 import json
 from colorama import init, Fore, Back, Style
 #init(autoreset=True)
 
+#os.system('runas & cd C:\\Users\\user\\Desktop\\PAX_PAYWAVE_TA[20190307]_S920\\Host\\VcasStartHostApp & VcasStartHostApp.exe')
+#os.system("cd C:\\Users\\user\\Desktop\\PAX_PAYWAVE_TA[20190307]_S920\\Host\\VcasStartHostApp & VcasStartHostApp.exe")
+#os.system("cd C:\\Users\\user\\Desktop\\PAX_PAYWAVE_TA[20190307]_S920\\Host\\VcasStartHostApp & VcasStartHostApp.exe")
+#os.system("VcasStartHostApp.exe")
+#win32api.ShellExecute(0, 'runas', "VcasStartHostApp.exe", '', 'C:\\Users\\user\\Desktop\\PAX_PAYWAVE_TA[20190304]_S920\\Host\\VcasStartHostApp\\', 1)  # shall be run stop and start executable and then getdevicestate
+# #win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
+#raw_input()
+
+
 class dbClient(object):
 	def __init__(self):
 		try:
-			self.db = MySQLdb.connect(user='itastdirector', passwd='APtsd01$', host='192.168.48.60', db='itastdb')
+			self.db = MySQLdb.connect(user='itast', passwd='APtsd01$', host='192.168.48.195', db='itast')
 		except Exception as e:
 			self.errHandle(e)
 
@@ -188,11 +197,10 @@ def watchdog(f):
 		if response[0] != '00':  # prepare transaction procedure
 			start = self.conf["start"]  # start service address
 			stop = self.conf["stop"]  # stop service address
-			resetsupport = self.conf["resetsupport"]  # Device support reset function or not: 0 supported, 1 not supported
-			super(sdkClient, self).getNewLog(sessionID, caseID, 'Execute refresh procedure', '', '', '')
-			if not self.reset(dutID, stop, start, resetsupport):
+			super(sdkClient, self).createLog(sessionID, caseID, 'Execute refresh procedure')
+			if not self.reset(dutID, stop, start, sessionID):
 				self.errHandle('reset failure')
-			response = f(self, *args, **kwargs)
+			response = f(self, dutID, *args, **kwargs)
 			if response[0] != '00':
 				self.errHandle('Cannot receive proper response even after reset procedure.')
 		return response
@@ -203,8 +211,8 @@ class sdkClient(dbClient):
 		# initial db object
 		super(sdkClient, self).__init__()
 		# get conf.json in prior dictionary
-		self.confPath = os.path.abspath(os.path.dirname(os.getcwd()))
-		with open(self.confPath + '/conf.json') as json_file:
+		#self.confPath = os.path.abspath(os.path.dirname(os.getcwd()))
+		with open('conf.json') as json_file:
 			self.conf = json.load(json_file)
 
 	def __del__(self):
@@ -243,6 +251,7 @@ class sdkClient(dbClient):
 	def sdkStartTransactionAsync(self, d, amount, tx, pos):
 		from itast.robot import goto_DUT_tx, goto_DUT, leave
 		max_waiting_rffield = self.conf['deviceWaitingTime']
+		asyncsupport = self.conf["asyncsupport"]  # Device support reset function or not: 0 supported, 1 not supported
 		err_response = ['01', '']  # emulate return code 01 and no return value
 
 		# simple rewrite of class threading.Thread to get result from the end of thread.
@@ -284,20 +293,21 @@ class sdkClient(dbClient):
 		tx['duration'] = downTime2 - downTime1
 		super(sdkClient, self).updateTx(tx)
 		if t1.isAlive():
-			t1.join(13 - 1 - max_waiting_rffield)  # shall be improved: refer to timeout time
-			if t1.isAlive():
-				t2.start()
+			# In sdk guideline 1.6, StartTransactionAsync and StopCurrentTransaction are optional
+			if asyncsupport == '00':
+				t1.join(13 - 1 - max_waiting_rffield)  # shall be improved: refer to timeout time
+				if t1.isAlive():
+					t2.start()
+					t1.join()
+					if t2.isAlive():
+						t2.join()
+			else:
 				t1.join()
-				if t2.isAlive():
-					t2.join()
 		response = t1.get_result()
 		# Deal with EF05: Request reset
 		if response[1][5:9] == 'EF05':
-			if self.conf["resetsupport"] == "01":
-				raw_input('Please reset the device manually and reconnect the device and webservice!\n')
-			else:
-				self.sdkResetDevice(d)
-				time.sleep(20)
+			self.sdkResetDevice(d)
+			time.sleep(self.conf['resetTime'])
 		# GetDebugLogs from last transaction
 		if self.sdkGetDebugLog(d, tx)[0] != '00':  # Getdebuglog from last transaction
 			return err_response
@@ -310,8 +320,9 @@ class sdkClient(dbClient):
 		return self.requestJson('/sdk/getdebuglog' + d + '?' + urlencode(tx))
 
 	@watchdog
-	def sdkClearLogs(self, d, tx):
-		return self.requestJson('/sdk/clearlogs' + d + '?' + urlencode(tx))
+	def sdkClearLogs(self, d):
+		#return self.requestJson('/sdk/clearlogs' + d + '?' + urlencode(tx))
+		return self.requestJson('/sdk/clearlogs' + d)
 
 	def sdkGetDeviceState(self, d):
 		return self.requestJson('/sdk/getdevicestate' + d)
@@ -320,9 +331,8 @@ class sdkClient(dbClient):
 		return self.requestJson('/sdk/resetdevice' + d)
 
 	# case verdict calculation
-	def genVerdict(self, retcode, posVerdict, txOnlineCounter, deviceConf, dutID, sessionID, caseID):  # TODO: EF00
+	def genVerdict(self, amount, retcode, posVerdict, txOnlineCounter, deviceConf, dutID, sessionID, caseID):  # TODO: EF00
 		ttq = deviceConf[dutID][1].split('\n')[0][5:]  # from command GetConfig()
-		amount = 0.01
 		if (retcode == '5931') or (retcode == '3030'):
 			posVerdict.append('PASS')
 		elif (retcode == 'EF03') or (retcode == 'EF04') or (retcode == 'EF05'):
@@ -336,25 +346,26 @@ class sdkClient(dbClient):
 				byte14 = ('0' * (4 - len(byte14) % 4)) + byte14
 			if byte14[0] == '0':
 				posVerdict = []  # reset posVerdict if the device is not offline-only
-				# 1st solution to get online: change byte2 bit8 of TTQ
+				# TODO: CANNOT CHANGE TTQ VIA SETCONFIG(), C# setconfig() function does not support UINT32[]
+				# # 1st solution to get online: change byte2 bit8 of TTQ
+				# if txOnlineCounter == 0:
+				# 	ttqTObit = bin(int(ttq, 16))[2:]  # [2:] is to remove '0b'
+				# 	ttqTObit = ttqTObit[:8] + '1' + ttqTObit[9:]
+				# 	ttqint = int(ttqTObit, 2)
+				# 	ttq = hex(int(ttqTObit, 2))[2:]
+				# 	self.sdkSetConfig(dutID, sessionID, caseID, tag=1, value=ttqint)
+				# 1st solution to get online: enable status check and use amount 1
 				if txOnlineCounter == 0:
-					ttqTObit = bin(int(ttq, 16))[2:]  # [2:] is to remove '0b'
-					ttqTObit = ttqTObit[:8] + '1' + ttqTObit[9:]
-					ttq = hex(int(ttqTObit, 2))[2:]
-					self.sdkSetConfig(dutID, tag=1, value=ttq)
-				# 2nd solution to get online: enable status check and use amount 1
-				if txOnlineCounter == 1:
 					self.sdkSetConfigToDefault(dutID, sessionID, caseID)
-					self.sdkSetConfig(dutID, tag=3, value=1)
+					self.sdkSetConfig(dutID, sessionID, caseID, tag=3, value=1)
 					amount = 1.00
-				# 3rd solution to get online: disable cvm limit check and use amount 81
-				if txOnlineCounter == 2:
+				# 2nd solution to get online: disable cvm limit check and use amount 81
+				elif txOnlineCounter == 1:
 					self.sdkSetConfigToDefault(dutID, sessionID, caseID)
-					# TODO: check
-					self.sdkSetConfig(dutID, tag=11, value=0)
+					self.sdkSetConfig(dutID, sessionID, caseID, tag=11, value=0)
 					amount = 81.00
 				else:
-					self.errHandle('Cannot Get online transaction by all means, please check manually.')
+					self.errHandle('Cannot Get online transaction by all means, please check manually. txOnlineCounter=%s' %txOnlineCounter)
 			else:
 				posVerdict.append('PASS')  # If device is offline-only, 5A31 can be accepted with PASS verdict
 		else:
@@ -362,24 +373,31 @@ class sdkClient(dbClient):
 		txOnlineCounter += 1
 		return [txOnlineCounter, amount, posVerdict]
 
-	def reset(self, d, stop, start, resetsupport):  # Input data: device number, startservice and stopservice address, reset support or not
+	def reset(self, d, stop, start, sessionID):  # Input data: device number, startservice and stopservice address, reset support or not
 		for resetChance in range(3):
-			if resetsupport == '00':
-				resetTime = self.conf['resetTime']
-				resetRes = self.sdkResetDevice(d)[0]
-				time.sleep(resetTime)
-				if resetRes != '00':
-					pass
-				elif self.sdkGetDeviceState(d)[0] != '00':
-					pass
-				else:
-					return True
+			# ResetDevice() command is mandatory
+			resetTime = self.conf['resetTime']
+			resetRes = self.sdkResetDevice(d)[0]
+			time.sleep(resetTime)
+			if resetRes != '00':
+				pass
+			elif self.sdkGetDeviceState(d)[0] != '00':
+				pass
+			else:
+				return True
 			# common process
-			raw_input('Please reset the device manually and reconnect the device and webservice!\n')
+			#raw_input('Please reset the device manually and reconnect the device and webservice!\n')
 			if self.sdkGetDeviceState(d)[0] != '00':
-				win32api.ShellExecute(0, 'open', stop, '', '', 1)  # shall be run stop and start executable and then getdevicestate
+				win32api.ShellExecute(0, 'open', stop[1], '', stop[0], 1)  # shall be run stop and start executable and then getdevicestate
 				time.sleep(4)
-				win32api.ShellExecute(0, 'open', start, '', '', 1)  # TODO: connect host with device
+				win32api.ShellExecute(0, 'open', start[1], '', start[0], 1)  # TODO: connect host with device
+				# win32api.ShellExecute(0, 'open', 'VcasStopHostApp.exe', '',
+				# 					  'C:\\Users\\user\\Desktop\\PAX_PAYWAVE_TA[20190307]_S920\\Host\\VcasStopHostApp\\',
+				# 					  1)
+				# time.sleep(4)
+				# win32api.ShellExecute(0, 'open', "VcasStartHostApp.exe", '', 'C:\\Users\\user\\Desktop\\PAX_PAYWAVE_TA[20190307]_S920\\Host\\VcasStartHostApp\\', 1)  # shall be run stop and start executable and then getdevicestate
+
+
 				time.sleep(15)
 				if self.sdkGetDeviceState(d)[0] == '00':
 					return True
@@ -393,7 +411,7 @@ class dispenserClient(object):
 		initial = {'d1': d1, 'd2': d2, 'd3': d3, 'd4': d4}
 		return sdkClient.requestJson('/dispenser/initiate' + '?' + urlencode(initial))
 	def dispenserMov(self, id, dis, dir):
-		return sdkClient.requestJson('/dispenser/rack' + id + dir + '?' + 'distance=' + dis)
+		return sdkClient.requestJson('/dispenser/rack' + id + dir + '?' + 'distance=' + str(dis))
 
 
 if __name__ == '__main__':
