@@ -7,7 +7,8 @@
     ],
     "RACKLIST":{
         "rackin":["1","2"],
-        "rackout":["3","3"]
+        "rackout":["3","3"],
+        "rackfail":["4"]
     },
     "cardHeight": 2.8,
     "deviceWaitingTime": 3,

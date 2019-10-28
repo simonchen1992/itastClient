@@ -14,6 +14,11 @@ db = dbClient()
 vcas = sdkClient()
 dispenser = dispenserClient()
 
+
+def errHandler(msg):
+	raw_input(Fore.RED + str(msg) + Style.RESET_ALL)
+	exit(1)
+
 # read configuration from json file
 with open('conf.json') as json_file:
 	conf = json.load(json_file)
@@ -22,11 +27,10 @@ QRPORT = conf["portnumber"]["qrscan"]  # port number of qr scanner
 cardHeight = conf['cardHeight']
 RACK_IN = conf['RACKLIST']['rackin']
 RACK_OUT = conf['RACKLIST']['rackout']
-
-def errHandler(msg):
-	raw_input(Fore.RED + str(msg) + Style.RESET_ALL)
-	exit(1)
-
+RACK_FAIL = conf['RACKLIST']['rackfail']
+if len(RACK_FAIL) > 1:
+	errHandler('RackFail only accept one dispenser number')
+	
 def prompt(msg):
 	print msg
 	return stdin.readline().strip('\n')
@@ -49,13 +53,15 @@ def promptFillSessionData(s):
 	s['dutref_name'] = prompt("DUT ref Name (model): ")
 	s['dutref_id'] = prompt('DUT ref ID (or part number): ')
 	s['dut1_offset'] = prompt("DUT 1 offset(mm) is: ")
-	s['dut1_offset'] = 0 if s['dut1_offset'].strip() == '' else s['dut1_offset']
+	s['dut1_offset'] = 0 if s['dut1_offset'].strip() == '' else int(s['dut1_offset'])
 	s['dut2_offset'] = prompt("DUT 2 offset(mm) is: ")
-	s['dut2_offset'] = 0 if s['dut2_offset'].strip() == '' else s['dut2_offset']
+	s['dut2_offset'] = 0 if s['dut2_offset'].strip() == '' else int(s['dut1_offset'])
 	if s['dut1_offset'] >= 5 or s['dut2_offset'] >= 5:
 		errHandler('The offset shall be smaller than 5mm according to EMV Requirements.')
 	s['notes'] = prompt("Any comment or notes shall be here: ")
 	s['visa_vtf'] = prompt("Visa VTF(for TA only): ")
+	s['visa_vtf'] = prompt("Visa template name: ")
+	s['report_template'] = prompt("Report template name: ")
 
 # explain test positions from VISA template
 def transTestPosition(st):
@@ -90,7 +96,6 @@ def dispenserInitiate(s):
 def sdkInitiate(dutID, sessionID):
 	vcas.sdkSetConfigToDefault(dutID, sessionID, '0')  # prepare transaction procedure
 	return vcas.sdkGetConfig(dutID, sessionID, '0')
-
 
 # Test run of robot to find unaddressable positions (only care about dut1)
 # Take card process of test run need to be improved
@@ -331,6 +336,7 @@ def main_loop():
 									case['verdict'] = 'TF'
 									db.updateCase(case)
 								break
+			rackOut = RACK_FAIL[0] if len(RACK_FAIL) == 1 else rackOut
 			robot.goto_rack(rackOut)
 			robot.releasecard()
 			dispenser.dispenserMov(rackOut, cardHeight, 'down')
