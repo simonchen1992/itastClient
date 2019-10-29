@@ -46,6 +46,7 @@ def promptYesNo(msg):
 def promptFillSessionData(s):
 	s['expedient'] = prompt("Expedient: ")
 	s['owner'] = prompt("Testing Engineer: ")
+	s['taptophone_product'] = int(prompt("Is it a tap-to-phone product? If yes, enter 1. If no, enter 0."))
 	s['dut1_name'] = prompt("DUT 1 Name (model): ")
 	s['dut1_id'] = prompt("DUT 1 ID (or S/N number): ")
 	s['dut2_name'] = prompt("DUT 2 Name (model): ")
@@ -122,6 +123,7 @@ def main_loop():
 	else:
 		session = db.getSession(newSession)
 	sessionID = session['id']
+	sessionTaptophoneFlag = True if session['taptophone_product'] == 1 else False
 	# Initialize the robot and calibrate positions for DUTs and dispensers
 	robot.init(session, DEVICELIST)
 	db.createLog(sessionID, '0', 'Position 0C calibration performed', '', '', '')
@@ -232,7 +234,7 @@ def main_loop():
 						# execute testing on test height-positions
 						print "Testing " + posID + " of card " + str(card['id']) + ' on DUT' + dutID + str(attempt + 1)
 						tx = db.createTx(sessionID, caseID, cardID, dutID, posID, '0000')
-						txResult = vcas.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, pos)[1][5:9]
+						txResult = vcas.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, pos, sessionTaptophoneFlag)[1][5:9]
 						print txResult
 						txUpdate = vcas.genVerdict(amount, txResult, posVerdict, txOnlineCounter, config, dutID, sessionID, caseID)
 						txOnlineCounter = txUpdate[0]
@@ -310,7 +312,7 @@ def main_loop():
 						while attempt < 5:
 							print "Testing " + posID + " of card " + str(card['id']) + ' on DUT' + dutID + str(attempt + 1)
 							tx = db.createTx(sessionID, caseID, cardID, dutID, posID, '0000')
-							txResult = vcas.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, pos)[1][5:9]
+							txResult = vcas.sdkStartTransactionAsync(dutID, sessionID, caseID, amount, tx, pos, sessionTaptophoneFlag)[1][5:9]
 							print txResult
 							txUpdate = vcas.genVerdict(amount, txResult, posVerdict, txOnlineCounter, config, dutID, sessionID, caseID)
 							txOnlineCounter = txUpdate[0]

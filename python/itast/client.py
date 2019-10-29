@@ -248,10 +248,11 @@ class sdkClient(dbClient):
 		return self.requestJson('/sdk/starttransaction' + d + '?' + 'amount=' + str(amount) + '&' + urlencode(tx))
 
 	@watchdog
-	def sdkStartTransactionAsync(self, d, amount, tx, pos):
+	def sdkStartTransactionAsync(self, d, amount, tx, pos, taptophoneFlag):
 		from itast.robot import goto_DUT_tx, goto_DUT, leave
 		max_waiting_rffield = self.conf['deviceWaitingTime']
-		asyncsupport = self.conf["asyncsupport"]  # Device support reset function or not: 0 supported, 1 not supported
+		asyncsupport = self.conf["asyncsupport"]  # Device support reset function or not: 00 supported, 01 not supported
+		asyncsupport = '01' if taptophoneFlag else asyncsupport
 		err_response = ['01', '']  # emulate return code 01 and no return value
 
 		# simple rewrite of class threading.Thread to get result from the end of thread.
@@ -366,11 +367,12 @@ class sdkClient(dbClient):
 					amount = 81.00
 				else:
 					self.errHandle('Cannot Get online transaction by all means, please check manually. txOnlineCounter=%s' %txOnlineCounter)
+				txOnlineCounter += 1
 			else:
 				posVerdict.append('PASS')  # If device is offline-only, 5A31 can be accepted with PASS verdict
 		else:
 			self.errHandle('improper result: ' + str(retcode))
-		txOnlineCounter += 1
+		
 		return [txOnlineCounter, amount, posVerdict]
 
 	def reset(self, d, stop, start, sessionID):  # Input data: device number, startservice and stopservice address, reset support or not
