@@ -172,21 +172,21 @@ def main_loop():
 			# Traversal for all devices to be test, configured in json file
 			for dutID in DEVICELIST:
 				vcas.sdkClearLogs(dutID, sessionID, caseID='')
-				if defectiveflag:
+				#  BAD CASE: SHALL NOT HAPPEN IN REGULAR OPERATION
+				if defectiveflag is True or card['active'] != 1:
 					break
+				# if the device has changed its config because of offline decline transaction, system needs to reset the config.
 				if offlineflag:
 					vcas.sdkSetConfigToDefault(dutID, sessionID, caseID='')
 				#  Initial flags
 				breakflag = False  # This flag will be set to true when one position is tested with verdict
-				offlineflag = False  # This flag is only used to mark test case in database
+				offlineflag = False  # This flag is only used to mark 'offline decline' test case in database
 				passflag = False  # This flag is to determine if z=2 needs to be tested
 				failInthreeflag = False  # This flag is to determine if z=2 needs to be tested
+				failflag = False  # This flag is to determine if rackfail will be used
 				#  Parameter: Reset transaction parameter, shall be reset after change device
 				txOnlineCounter = 0
 				amount = 0.01
-				#  BAD CASE: SHALL NOT HAPPEN IN REGULAR OPERATION
-				if card['active'] != 1:
-					break
 				#  Get non tested position for each dut
 				nonTestPos = transTestPosition(card['positions'])
 				if nonReachPos[dutID] is not None:  # or it will raise "None type is not iterable"
@@ -289,6 +289,7 @@ def main_loop():
 							db.updateCase(case)
 							break
 						if (posVerdict.count('CF') + posVerdict.count('TF')) >= 3:
+							failflag = True
 							if pos[3] == 3:
 								failInthreeflag = True
 							if posVerdict.count('CF') >= 3:
@@ -338,7 +339,7 @@ def main_loop():
 									case['verdict'] = 'TF'
 									db.updateCase(case)
 								break
-			rackOut = RACK_FAIL[0] if len(RACK_FAIL) == 1 else rackOut
+			rackOut = RACK_FAIL[0] if (len(RACK_FAIL) == 1 and failflag is True) else rackOut
 			robot.goto_rack(rackOut)
 			robot.releasecard()
 			dispenser.dispenserMov(rackOut, cardHeight, 'down')
